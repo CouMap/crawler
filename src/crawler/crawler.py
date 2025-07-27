@@ -634,113 +634,26 @@ class Crawler(BaseCrawler):
             return total_stats
 
     def extract_region_from_address(self, address):
-        """주소에서 지역 정보 추출 - 원본과 동일한 로직"""
+        """주소에서 지역 정보 추출 - 간소화된 버전"""
         try:
             logger.debug(f"주소 파싱: {address}")
 
-            # 행정구역 매핑 테이블
-            province_mapping = {
-                '서울': '서울특별시',
-                '부산': '부산광역시',
-                '대구': '대구광역시',
-                '인천': '인천광역시',
-                '광주': '광주광역시',
-                '대전': '대전광역시',
-                '울산': '울산광역시',
-                '세종': '세종특별자치시',
-                '경기': '경기도',
-                '강원': '강원도',
-                '충북': '충청북도',
-                '충남': '충청남도',
-                '전북': '전라북도',
-                '전남': '전라남도',
-                '경북': '경상북도',
-                '경남': '경상남도',
-                '제주': '제주특별자치도'
-            }
+            # AddressParser 사용
+            parsed = self.address_parser.parse_address(address)
 
-            # 주소 파싱
-            parts = address.replace(',', ' ').split()
-            logger.debug(f"주소 분할: {parts}")
+            province = parsed.get('province')
+            city = parsed.get('city')
+            town = parsed.get('town')
 
-            province = None
-            city = None
-            town = None
+            if not province or not city:
+                logger.warning(f"필수 지역 정보 누락: {address}")
+                return None
 
-            # 1단계: 시/도 찾기
-            for part in parts:
-                # 직접 매칭
-                if part in province_mapping:
-                    province = province_mapping[part]
-                    logger.debug(f"시/도 직접 매칭: {part} → {province}")
-                    break
-                # 부분 매칭
-                for key, value in province_mapping.items():
-                    if key in part:
-                        province = value
-                        logger.debug(f"시/도 부분 매칭: {part} ({key}) → {province}")
-                        break
-                if province:
-                    break
-
-            # 2단계: 시/군/구 찾기
-            for part in parts:
-                if any(suffix in part for suffix in ['구', '시', '군']):
-                    # 시/도가 아닌 것만 선택 (특별시, 광역시, 도 등 제외)
-                    if not any(province_suffix in part for province_suffix in ['특별시', '광역시', '도', '자치시', '자치도']):
-                        # 특별한 경우 처리
-                        if '구' in part and not part.endswith('구'):
-                            # "강남구청" 같은 경우 "강남구"로 추출
-                            if part.endswith('청') or part.endswith('역'):
-                                city = part.replace('청', '').replace('역', '')
-                                if not city.endswith('구'):
-                                    city += '구'
-                            else:
-                                city = part
-                        else:
-                            city = part
-                        logger.debug(f"시/군/구 매칭: {part} → {city}")
-                        break
-
-            # 3단계: 읍/면/동 찾기
-            for part in parts:
-                if any(suffix in part for suffix in ['동', '면', '읍', '리']):
-                    town = part
-                    logger.debug(f"읍/면/동 매칭: {part} → {town}")
-                    break
-
-            # 기본값 설정
-            if not province:
-                if '강남구' in address:
-                    province = '서울특별시'
-                    logger.debug(f"기본값 설정: 강남구 감지 → {province}")
-                else:
-                    logger.warning(f"시/도를 식별할 수 없음: {address}")
-                    return None
-
-            if not city:
-                if '강남구' in address:
-                    city = '강남구'
-                    logger.debug(f"기본값 설정: 강남구 감지 → {city}")
-                else:
-                    logger.warning(f"시/군/구를 식별할 수 없음: {address}")
-                    return None
-
-            logger.debug(f"최종 파싱 결과: {province} > {city} > {town or '(없음)'}")
-
-            # 데이터베이스에서 지역 조회
-            logger.debug("DB에서 지역 조회 중...")
-            region = self.db.get_region_by_name(province, city, town)
-
-            if region:
-                logger.debug(f"지역 매칭 성공: ID={region.id}, {region.province} {region.city} {region.town or ''}")
-            else:
-                logger.warning(f"DB에서 지역을 찾을 수 없음: {province} {city} {town}")
-
-            return region
+            logger.debug(f"파싱 결과: {province} > {city} > {town}")
+            return (province, city, town)
 
         except Exception as e:
-            logger.error(f"지역 정보 추출 실패: {e}")
+            logger.error(f"주소 파싱 실패: {e}")
             return None
 
     def crawl_all_regions(self) -> Dict[str, Any]:
