@@ -123,11 +123,27 @@ class Crawler(BaseCrawler):
             var radiusLabels = ['3km', '1km', '500m', '200m'];
             var selectedRadius = null;
 
+            // 모든 라디오 버튼 체크 해제
+            radiusOptions.forEach(function(id) {
+                var element = document.getElementById(id);
+                if (element) {
+                    element.checked = false;
+                    var radioBox = element.closest('.radio-box');
+                    if (radioBox) {
+                        radioBox.classList.remove('checked');
+                    }
+                }
+            });
+
+            // 가장 큰 범위부터 찾아서 선택
             for (var i = 0; i < radiusOptions.length; i++) {
                 var radiusElement = document.getElementById(radiusOptions[i]);
-                if (radiusElement && !radiusElement.disabled) {
+                if (radiusElement && radiusElement.offsetParent !== null) {  // 보이는 요소인지 확인
                     radiusElement.checked = true;
-                    radiusElement.closest('.radio-box').classList.add('checked');
+                    var radioBox = radiusElement.closest('.radio-box');
+                    if (radioBox) {
+                        radioBox.classList.add('checked');
+                    }
                     selectedRadius = radiusLabels[i];
                     console.log('검색반경: ' + selectedRadius + ' 선택 (가장 큰 범위)');
                     break;
@@ -136,6 +152,17 @@ class Crawler(BaseCrawler):
 
             if (!selectedRadius) {
                 console.log('검색반경 옵션을 찾을 수 없음');
+                // 기본값으로 500m 선택
+                var defaultRadius = document.getElementById('radiusRdo2');
+                if (defaultRadius) {
+                    defaultRadius.checked = true;
+                    var radioBox = defaultRadius.closest('.radio-box');
+                    if (radioBox) {
+                        radioBox.classList.add('checked');
+                    }
+                    selectedRadius = '500m';
+                    console.log('기본값으로 500m 선택');
+                }
             }
 
             // 위치 - 지역선택으로 변경
@@ -159,11 +186,19 @@ class Crawler(BaseCrawler):
                 }
             }, 1000);
 
-            return 'conditions_set';
+            return {
+                status: 'conditions_set',
+                selectedRadius: selectedRadius
+            };
             """
 
             result = self.driver.execute_script(script)
-            logger.info("검색 조건 설정 완료 - 동적 검색반경 선택")
+
+            if isinstance(result, dict) and result.get('selectedRadius'):
+                logger.info(f"검색 조건 설정 완료 - 검색반경: {result['selectedRadius']}")
+            else:
+                logger.info("검색 조건 설정 완료 - 동적 검색반경 선택")
+
             time.sleep(3)
 
         except Exception as e:
@@ -572,13 +607,9 @@ class Crawler(BaseCrawler):
 
             # 지역 목록 가져오기
             provinces = self.get_all_regions_from_site()
-            logger.info(f"KB사이트에서 가져온 시/도 목록: {[p['name'] for p in provinces]}")
 
             for province in provinces:
-                logger.info(f"현재 검사 중인 시/도: '{province['name']}', 찾는 지역: '{province_name}'")
-
                 if province_name and province_name not in province['name']:
-                    logger.info(f"'{province['name']}'은 '{province_name}'과 매칭되지 않음 - 건너뛰기")
                     continue
 
                 logger.info(f"시/도 크롤링: {province['name']}")
