@@ -58,8 +58,6 @@ class Database:
 
     def get_or_create_region(self, province: str, city: str, town: Optional[str] = None) -> Region:
         """지역 조회 또는 생성"""
-        import time
-
         with self.get_session() as session:
             # 1차: 정확한 매칭 시도
             result = session.query(Region).filter(
@@ -76,25 +74,19 @@ class Database:
             # 2차: 없으면 새로 생성
             logger.info(f"새 지역 생성: {province} {city} {town}")
 
-            # 지역 코드 생성 (유니크하게)
-            import hashlib
-            code_str = f"{province}{city}{town or ''}{int(time.time())}"
-            code = hashlib.md5(code_str.encode()).hexdigest()[:10]
-
             new_region = Region(
                 province=province,
                 city=city,
                 town=town,
-                code=code
+                code=None
             )
 
             session.add(new_region)
             session.flush()
             session.expunge(new_region)
 
-            logger.info(f"지역 생성 완료: ID={new_region.id}, {province} {city} {town}")
+            logger.info(f"지역 생성 완료: ID={new_region.id}")
             return new_region
-
 
     def get_all_regions(self) -> List[Region]:
         """모든 지역 조회"""

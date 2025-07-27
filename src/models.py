@@ -14,7 +14,7 @@ class Region(Base):
     province = Column(String(255), nullable=False)
     city = Column(String(255), nullable=False)
     town = Column(String(255), nullable=True)
-    code = Column(String(255), unique=True, nullable=False)
+    code = Column(String(255), unique=True, nullable=True)
 
     # 관계 추가
     stores = relationship("Store", back_populates="region")
