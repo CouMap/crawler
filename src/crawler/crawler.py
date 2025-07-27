@@ -467,26 +467,12 @@ class Crawler(BaseCrawler):
         try:
             script = """
             var allResults = [];
-            var seenStores = new Set();
 
-            console.log('=== 데이터 추출 시작 ===');
+            console.log('=== 데이터 추출 시작 (원본 그대로 사용) ===');
 
             // 디버깅: 전역 변수 상태 확인
             console.log('totalCnt:', typeof totalCnt !== 'undefined' ? totalCnt : 'undefined');
-            console.log('resultGpsJson:', typeof resultGpsJson !== 'undefined' ? resultGpsJson.length : 'undefined');
-            console.log('resultOnnrJson:', typeof resultOnnrJson !== 'undefined' ? resultOnnrJson.length : 'undefined');
-            console.log('resultTrdtJson:', typeof resultTrdtJson !== 'undefined' ? resultTrdtJson.length : 'undefined');  
             console.log('resultMinsJson:', typeof resultMinsJson !== 'undefined' ? resultMinsJson.length : 'undefined');
-
-            // 중복 체크 함수
-            function isDuplicate(name, address) {
-                var key = name + '|' + address;
-                if (seenStores.has(key)) {
-                    return true;
-                }
-                seenStores.add(key);
-                return false;
-            }
 
             // 데이터 처리 함수
             function processData(data, type) {
@@ -494,7 +480,6 @@ class Crawler(BaseCrawler):
                     console.log(type + ' 원본 데이터:', data.length + '개');
                     var processedCount = 0;
                     var skippedCount = 0;
-                    var duplicateCount = 0;
 
                     // 모든 데이터 처리
                     for (var i = 0; i < data.length; i++) {
@@ -508,57 +493,53 @@ class Crawler(BaseCrawler):
                                 continue;
                             }
 
-                            if (!isDuplicate(name, address)) {
-                                allResults.push({
-                                    type: type,
-                                    name: name,
-                                    address: address,
-                                    category: item.content.category || '',
-                                    phone: item.content.tel || '',
-                                    distance: item.content.distance || ''
-                                });
-                                processedCount++;
-                            } else {
-                                duplicateCount++;
-                            }
+                            allResults.push({
+                                type: type,
+                                name: name,
+                                address: address,
+                                category: item.content.category || '',
+                                phone: item.content.tel || '',
+                                distance: item.content.distance || ''
+                            });
+                            processedCount++;
                         } else {
                             skippedCount++;
                         }
                     }
                     console.log(type + ' 처리결과:');
                     console.log('  - 처리완료: ' + processedCount + '개');
-                    console.log('  - 중복제거: ' + duplicateCount + '개');
                     console.log('  - 빈데이터: ' + skippedCount + '개');
-                    console.log('  - 총계확인: ' + (processedCount + duplicateCount + skippedCount) + ' = ' + data.length);
+                    console.log('  - 총계확인: ' + (processedCount + skippedCount) + ' = ' + data.length);
                 } else {
                     console.log(type + ' 데이터 없음');
                 }
             }
 
-            // 소비쿠폰만 처리 (다른 타입들은 제외)
+            // 소비쿠폰만 처리
             processData(resultMinsJson, '소비쿠폰');
 
             // 전체 카운트 확인
             var totalCount = document.querySelector('[data-comma="total"]');
             var totalText = totalCount ? totalCount.textContent.trim() : '0';
 
-            console.log('=== 추출 완료 (중복 제거 후) ===');
+            console.log('=== 추출 완료 (원본 데이터 그대로) ===');
             console.log('총 추출된 데이터:', allResults.length + '개');
             console.log('페이지 표시 총계:', totalText + '건');
 
-            // 차이가 있으면 경고
+            // 일치 여부 확인
             var displayTotal = parseInt(totalText.replace(/,/g, '')) || 0;
-            if (allResults.length !== displayTotal && displayTotal > 0) {
-                console.log('경고: 추출된 데이터(' + allResults.length + '개)와 표시 총계(' + displayTotal + '개)가 다름');
+            if (allResults.length === displayTotal) {
+                console.log('✓ 완벽 일치: 모든 데이터 추출 성공');
+            } else if (allResults.length < displayTotal) {
+                console.log('일부 누락: 빈 데이터로 인한 차이');
+            } else {
+                console.log('초과 추출');
             }
 
             return {
                 total_display: totalText,
                 results: allResults,
                 counts: {
-                    gps: typeof resultGpsJson !== 'undefined' && Array.isArray(resultGpsJson) ? resultGpsJson.length : 0,
-                    onnr: typeof resultOnnrJson !== 'undefined' && Array.isArray(resultOnnrJson) ? resultOnnrJson.length : 0,
-                    trdt: typeof resultTrdtJson !== 'undefined' && Array.isArray(resultTrdtJson) ? resultTrdtJson.length : 0,
                     mins: typeof resultMinsJson !== 'undefined' && Array.isArray(resultMinsJson) ? resultMinsJson.length : 0
                 },
                 extracted_count: allResults.length,
@@ -575,31 +556,17 @@ class Crawler(BaseCrawler):
 
                 logger.info(f"데이터 추출 분석:")
                 logger.info(f"  소비쿠폰 원본: {counts.get('mins', 0)}개")
-                logger.info(f"  최종 추출: {extracted}개")
+                logger.info(f"  최종 추출: {extracted}개 (원본 그대로)")
                 logger.info(f"  화면 표시: {display}개")
 
-                if extracted != display and display > 0:
+                if extracted == display:
+                    logger.info("완벽 일치: 모든 데이터 추출 성공")
+                elif extracted < display:
                     diff = display - extracted
-                    logger.warning(f"데이터 차이: {diff}개 (중복 또는 빈 데이터로 추정)")
-
-                    detail_script = """
-                    // 상세 분석 정보 반환
-                    return {
-                        duplicates: typeof duplicateCount !== 'undefined' ? duplicateCount : 0,
-                        skipped: typeof skippedCount !== 'undefined' ? skippedCount : 0,
-                        processed: typeof processedCount !== 'undefined' ? processedCount : 0
-                    };
-                    """
-
-                    try:
-                        detail_result = self.driver.execute_script(detail_script)
-                        if detail_result:
-                            logger.info(f"  - 중복 제거: {detail_result.get('duplicates', 0)}개")
-                            logger.info(f"  - 빈 데이터: {detail_result.get('skipped', 0)}개")
-                    except:
-                        logger.info(f"  (상세 분석 정보 확인 불가)")
+                    logger.warning(f"일부 누락: {diff}개 (빈 데이터로 추정)")
                 else:
-                    logger.info("데이터 추출 완료 - 차이 없음")
+                    diff = extracted - display
+                    logger.warning(f"초과 추출: {diff}개 (예상치 못한 상황)")
 
             return result
 
