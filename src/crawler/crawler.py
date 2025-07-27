@@ -464,7 +464,7 @@ class Crawler(BaseCrawler):
             logger.error(f"검색 실행 실패: {e}")
 
     def extract_data(self) -> Dict[str, Any]:
-        """JavaScript 변수에서 결과 추출"""
+        """JavaScript 변수에서 결과 추출 - 개수 제한 없음"""
         try:
             script = """
             var allResults = [];
@@ -489,11 +489,14 @@ class Crawler(BaseCrawler):
                 return false;
             }
 
-            // 데이터 처리 함수
+            // 데이터 처리 함수 - 개수 제한 제거
             function processData(data, type) {
                 if (typeof data !== 'undefined' && Array.isArray(data) && data.length > 0) {
-                    console.log(type + ' 데이터 발견:', data.length + '개');
-                    for (var i = 0; i < Math.min(data.length, 50); i++) {
+                    console.log(type + ' 원본 데이터:', data.length + '개');
+                    var processedCount = 0;
+
+                    // 모든 데이터 처리 (50개 제한 제거)
+                    for (var i = 0; i < data.length; i++) {
                         var item = data[i];
                         if (item && item.content) {
                             var name = item.content.title || '';
@@ -508,9 +511,13 @@ class Crawler(BaseCrawler):
                                     phone: item.content.tel || '',
                                     distance: item.content.distance || ''
                                 });
+                                processedCount++;
                             }
                         }
                     }
+                    console.log(type + ' 처리완료:', processedCount + '개 (중복제거 후)');
+                } else {
+                    console.log(type + ' 데이터 없음');
                 }
             }
 
@@ -528,6 +535,12 @@ class Crawler(BaseCrawler):
             console.log('총 추출된 데이터:', allResults.length + '개');
             console.log('페이지 표시 총계:', totalText + '건');
 
+            // 차이가 있으면 경고
+            var displayTotal = parseInt(totalText.replace(/,/g, '')) || 0;
+            if (allResults.length !== displayTotal && displayTotal > 0) {
+                console.log('⚠️ 경고: 추출된 데이터(' + allResults.length + '개)와 표시 총계(' + displayTotal + '개)가 다름');
+            }
+
             return {
                 total_display: totalText,
                 results: allResults,
@@ -536,11 +549,23 @@ class Crawler(BaseCrawler):
                     onnr: typeof resultOnnrJson !== 'undefined' && Array.isArray(resultOnnrJson) ? resultOnnrJson.length : 0,
                     trdt: typeof resultTrdtJson !== 'undefined' && Array.isArray(resultTrdtJson) ? resultTrdtJson.length : 0,
                     mins: typeof resultMinsJson !== 'undefined' && Array.isArray(resultMinsJson) ? resultMinsJson.length : 0
-                }
+                },
+                extracted_count: allResults.length,
+                display_total: displayTotal
             };
             """
 
             result = self.driver.execute_script(script)
+
+            # 추가 로그 출력
+            if result:
+                extracted = result.get('extracted_count', 0)
+                display = result.get('display_total', 0)
+                logger.info(f"데이터 추출 결과: {extracted}개 추출 / {display}개 표시")
+
+                if extracted != display and display > 0:
+                    logger.warning(f"⚠️ 데이터 불일치: 추출({extracted}) vs 표시({display})")
+
             return result
 
         except Exception as e:
