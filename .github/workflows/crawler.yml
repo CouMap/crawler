@@ -36,20 +36,6 @@ jobs:
   test:
     name: 테스트 실행
     runs-on: ubuntu-latest
-    services:
-      mysql:
-        image: mysql:8.0
-        env:
-          MYSQL_ROOT_PASSWORD: test_password
-          MYSQL_DATABASE: coumap_test
-          MYSQL_ROOT_HOST: '%'
-        options: >-
-          --health-cmd="mysqladmin ping --silent"
-          --health-interval=10s
-          --health-timeout=5s
-          --health-retries=3
-        ports:
-          - 3306:3306
 
     steps:
     - name: 코드 체크아웃
@@ -69,21 +55,30 @@ jobs:
         python -m pip install --upgrade pip
         pip install -r requirements.txt
 
-    - name: 코드 품질 검사 (선택적)
+    - name: 테스트 환경 설정 (외부 DB 직접 연결)
       run: |
-        echo "코드 품질 검사 건너뜀"
-
-    - name: 테스트 환경 설정
-      run: |
-        echo "DB_HOST=127.0.0.1" >> $GITHUB_ENV
-        echo "DB_PORT=3306" >> $GITHUB_ENV
-        echo "DB_USER=root" >> $GITHUB_ENV
-        echo "DB_PASSWORD=test_password" >> $GITHUB_ENV
-        echo "DB_NAME=coumap_test" >> $GITHUB_ENV
+        echo "DB_HOST=${{ secrets.DB_HOST }}" >> $GITHUB_ENV
+        echo "DB_PORT=${{ secrets.DB_PORT }}" >> $GITHUB_ENV
+        echo "DB_USER=${{ secrets.DB_USER }}" >> $GITHUB_ENV
+        echo "DB_PASSWORD=${{ secrets.DB_PASSWORD }}" >> $GITHUB_ENV
+        echo "DB_NAME=${{ secrets.DB_NAME }}" >> $GITHUB_ENV
         echo "NAVER_CLIENT_ID=${{ secrets.NAVER_CLIENT_ID }}" >> $GITHUB_ENV
         echo "NAVER_CLIENT_SECRET=${{ secrets.NAVER_CLIENT_SECRET }}" >> $GITHUB_ENV
         echo "KAKAO_API_KEY=${{ secrets.KAKAO_API_KEY }}" >> $GITHUB_ENV
         echo "HEADLESS=true" >> $GITHUB_ENV
+
+    - name: DB 연결 테스트
+      run: |
+        python -c "
+        from src.database import Database
+        try:
+            db = Database()
+            print('테스트: 외부 DB 연결 성공!')
+            print(f'연결 정보: {db.engine.url}')
+        except Exception as e:
+            print(f'테스트: DB 연결 실패: {e}')
+            raise
+        "
 
     - name: 데이터베이스 테이블 생성
       run: |
@@ -104,22 +99,6 @@ jobs:
     runs-on: ubuntu-latest
     if: github.event_name == 'workflow_dispatch'
 
-    services:
-      mysql:
-        image: mysql:8.0
-        env:
-            MYSQL_ROOT_PASSWORD: ${{ secrets.DB_PASSWORD }}
-            MYSQL_DATABASE: ${{ secrets.DB_NAME }}
-            MYSQL_USER: ${{ secrets.DB_USER }}
-            MYSQL_PASSWORD: ${{ secrets.DB_PASSWORD }}
-        options: >-
-          --health-cmd="mysqladmin ping --silent"
-          --health-interval=10s
-          --health-timeout=5s
-          --health-retries=3
-        ports:
-          - 3308:3306
-
     steps:
     - name: 코드 체크아웃
       uses: actions/checkout@v4
@@ -138,17 +117,30 @@ jobs:
         python -m pip install --upgrade pip
         pip install -r requirements.txt
 
-    - name: 환경 변수 설정
+    - name: 환경 변수 설정 (외부 DB 직접 연결)
       run: |
-        echo "DB_HOST=${{ secrets.DB_HOST }}" >> $GITHUB_ENV 
+        echo "DB_HOST=${{ secrets.DB_HOST }}" >> $GITHUB_ENV
         echo "DB_PORT=${{ secrets.DB_PORT }}" >> $GITHUB_ENV
-        echo "DB_USER=${{ secrets.DB_USER }}" >> $GITHUB_ENV 
+        echo "DB_USER=${{ secrets.DB_USER }}" >> $GITHUB_ENV
         echo "DB_PASSWORD=${{ secrets.DB_PASSWORD }}" >> $GITHUB_ENV
         echo "DB_NAME=${{ secrets.DB_NAME }}" >> $GITHUB_ENV
         echo "NAVER_CLIENT_ID=${{ secrets.NAVER_CLIENT_ID }}" >> $GITHUB_ENV
         echo "NAVER_CLIENT_SECRET=${{ secrets.NAVER_CLIENT_SECRET }}" >> $GITHUB_ENV
         echo "KAKAO_API_KEY=${{ secrets.KAKAO_API_KEY }}" >> $GITHUB_ENV
         echo "HEADLESS=true" >> $GITHUB_ENV
+
+    - name: DB 연결 테스트
+      run: |
+        python -c "
+        from src.database import Database
+        try:
+            db = Database()
+            print('외부 DB 연결 성공!')
+            print(f'연결 정보: {db.engine.url}')
+        except Exception as e:
+            print(f'DB 연결 실패: {e}')
+            raise
+        "
 
     - name: 데이터베이스 테이블 생성
       run: |
