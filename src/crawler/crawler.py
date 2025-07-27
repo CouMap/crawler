@@ -118,12 +118,24 @@ class Crawler(BaseCrawler):
             // 사용처 선택 - 기본으로 소비쿠폰이 체크되어 있으므로 그대로 사용
             console.log('사용처: 소비쿠폰 선택됨 (기본값)');
 
-            // 검색반경 - 500m
-            var radius500 = document.getElementById('radiusRdo2');
-            if (radius500) {
-                radius500.checked = true;
-                radius500.closest('.radio-box').classList.add('checked');
-                console.log('검색반경: 500m 선택');
+            // 검색반경 - 가장 큰 범위 자동 선택
+            var radiusOptions = ['radiusRdo4', 'radiusRdo3', 'radiusRdo2', 'radiusRdo1'];
+            var radiusLabels = ['3km', '1km', '500m', '200m'];
+            var selectedRadius = null;
+
+            for (var i = 0; i < radiusOptions.length; i++) {
+                var radiusElement = document.getElementById(radiusOptions[i]);
+                if (radiusElement && !radiusElement.disabled) {
+                    radiusElement.checked = true;
+                    radiusElement.closest('.radio-box').classList.add('checked');
+                    selectedRadius = radiusLabels[i];
+                    console.log('검색반경: ' + selectedRadius + ' 선택 (가장 큰 범위)');
+                    break;
+                }
+            }
+
+            if (!selectedRadius) {
+                console.log('검색반경 옵션을 찾을 수 없음');
             }
 
             // 위치 - 지역선택으로 변경
@@ -151,7 +163,7 @@ class Crawler(BaseCrawler):
             """
 
             result = self.driver.execute_script(script)
-            logger.info("검색 조건 설정 완료")
+            logger.info("검색 조건 설정 완료 - 동적 검색반경 선택")
             time.sleep(3)
 
         except Exception as e:
