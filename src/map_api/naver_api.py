@@ -48,21 +48,27 @@ class NaverSearchAPI(BaseMapAPI):
                     mapy = item.get('mapy', '')
 
                     if mapx and mapy:
-                        # 카텍좌표계를 WGS84로 변환
                         longitude = float(mapx) / 10000000
                         latitude = float(mapy) / 10000000
+
+                        road_address = item.get('roadAddress', '').strip()
+                        base_address = item.get('address', '').strip()
+
+                        final_address = road_address if road_address else base_address
+
+                        logger.debug(f"네이버 API 주소 처리: 도로명='{road_address}', 지번='{base_address}', 최종='{final_address}'")
 
                         return {
                             'latitude': latitude,
                             'longitude': longitude,
                             'place_name': item.get('title', '').replace('<b>', '').replace('</b>', ''),
-                            'address_name': item.get('address', ''),
-                            'road_address': item.get('roadAddress', ''),
+                            'base_address': base_address,
+                            'road_address': road_address,
+                            'final_address': final_address,
                             'category': item.get('category', ''),
                             'found': True
                         }
 
-                # 200 응답이지만 검색 결과 없음 - 이건 오류가 아님!
                 logger.debug(f"네이버 API 검색 결과 없음: {query}")
                 return {
                     'found': False,
@@ -70,7 +76,6 @@ class NaverSearchAPI(BaseMapAPI):
                     'query': query
                 }
 
-            # 200이 아닌 경우만 오류 처리
             return self.handle_api_error(response, query)
 
         except Exception as e:
@@ -92,11 +97,9 @@ class NaverSearchAPI(BaseMapAPI):
         try:
             logger.debug(f"네이버 검색 API 시작: {store_name}")
 
-            # 주소 정리
             clean_address = self.clean_address_for_search(address)
             dong = self.extract_dong_from_address(clean_address)
 
-            # 검색 시나리오들
             search_scenarios = [
                 f"{store_name} {dong} {category}".strip(),
                 f"{store_name} {dong}".strip(),

@@ -52,7 +52,6 @@ class IntegratedMapAPI:
         for pattern in patterns_to_remove:
             cleaned_name = re.sub(pattern, '', cleaned_name, flags=re.IGNORECASE)
 
-        # 연속된 공백을 단일 공백으로 변경하고 양끝 공백 제거
         cleaned_name = re.sub(r'\s+', ' ', cleaned_name).strip()
 
         if cleaned_name != store_name:
@@ -74,10 +73,11 @@ class IntegratedMapAPI:
 
             if naver_result['found']:
                 logger.info(f"네이버 검색 API 성공: {store_name}")
-                # API에서 받은 이름을 사용
+                # API에서 받은 이름과 주소 사용
                 if 'coordinates' in naver_result and 'place_name' in naver_result['coordinates']:
                     naver_result['api_store_name'] = naver_result['coordinates']['place_name']
-                    naver_result['api_store_addr'] = naver_result['coordinates']['road_address']
+                    api_address = naver_result['coordinates'].get('final_address', '').strip()
+                    naver_result['api_store_addr'] = api_address if api_address else address
                 else:
                     naver_result['api_store_name'] = store_name
                     naver_result['api_store_addr'] = address
@@ -92,10 +92,10 @@ class IntegratedMapAPI:
 
             if kakao_result['found']:
                 logger.info(f"카카오 지도 검색 성공: {store_name}")
-                # API에서 받은 이름을 사용
+                # API에서 받은 이름과 주소 사용
                 if 'coordinates' in kakao_result and 'place_name' in kakao_result['coordinates']:
                     kakao_result['api_store_name'] = kakao_result['coordinates']['place_name']
-                    kakao_result['api_store_addr'] = kakao_result['coordinates']['road_address_name']
+                    kakao_result['api_store_addr'] = kakao_result['coordinates'].get('road_address_name', address)
                 else:
                     kakao_result['api_store_name'] = store_name
                     kakao_result['api_store_addr'] = address
@@ -119,7 +119,6 @@ class IntegratedMapAPI:
 
     def get_coordinates_by_address(self, address: str) -> Dict[str, Any]:
         """주소로 좌표 조회"""
-        # 카카오 API가 주소 검색에 더 정확함
         if self.kakao_api:
             logger.debug("카카오 API로 주소 검색 시도...")
             result = self.kakao_api.get_coordinates_by_address(address)
