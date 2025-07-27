@@ -116,54 +116,7 @@ class Crawler(BaseCrawler):
 
             script = """
             // 사용처 선택 - 기본으로 소비쿠폰이 체크되어 있으므로 그대로 사용
-            console.log('사용처: 소비쿠폰 선택됨 (기본값)');
-
-            // 검색반경 - 가장 큰 범위 자동 선택
-            var radiusOptions = ['radiusRdo4', 'radiusRdo3', 'radiusRdo2', 'radiusRdo1'];
-            var radiusLabels = ['3km', '1km', '500m', '200m'];
-            var selectedRadius = null;
-
-            // 모든 라디오 버튼 체크 해제
-            radiusOptions.forEach(function(id) {
-                var element = document.getElementById(id);
-                if (element) {
-                    element.checked = false;
-                    var radioBox = element.closest('.radio-box');
-                    if (radioBox) {
-                        radioBox.classList.remove('checked');
-                    }
-                }
-            });
-
-            // 가장 큰 범위부터 찾아서 선택
-            for (var i = 0; i < radiusOptions.length; i++) {
-                var radiusElement = document.getElementById(radiusOptions[i]);
-                if (radiusElement && radiusElement.offsetParent !== null) {  // 보이는 요소인지 확인
-                    radiusElement.checked = true;
-                    var radioBox = radiusElement.closest('.radio-box');
-                    if (radioBox) {
-                        radioBox.classList.add('checked');
-                    }
-                    selectedRadius = radiusLabels[i];
-                    console.log('검색반경: ' + selectedRadius + ' 선택 (가장 큰 범위)');
-                    break;
-                }
-            }
-
-            if (!selectedRadius) {
-                console.log('검색반경 옵션을 찾을 수 없음');
-                // 기본값으로 500m 선택
-                var defaultRadius = document.getElementById('radiusRdo2');
-                if (defaultRadius) {
-                    defaultRadius.checked = true;
-                    var radioBox = defaultRadius.closest('.radio-box');
-                    if (radioBox) {
-                        radioBox.classList.add('checked');
-                    }
-                    selectedRadius = '500m';
-                    console.log('기본값으로 500m 선택');
-                }
-            }
+            console.log('사용처: 소비쿠폰 선택됨');
 
             // 위치 - 지역선택으로 변경
             var locationRadio = document.getElementById('locationRdo2');
