@@ -135,7 +135,6 @@ class BaseCrawler(ABC):
         pass
 
     def save_store_data(self, stores_data: List[Dict[str, Any]]) -> Dict[str, int]:
-        """가맹점 데이터 저장 - API 이름 사용"""
         logger.info(f"가맹점 데이터 저장 시작: {len(stores_data)}개")
 
         stats = {
@@ -180,17 +179,22 @@ class BaseCrawler(ABC):
 
                 latitude = None
                 longitude = None
-                final_store_name = original_name  # 기본값은 크롤링한 이름
+                final_store_name = original_name
+                final_store_addr = address
 
                 if search_result['found']:
                     coords = search_result['coordinates']
                     latitude = coords['latitude']
                     longitude = coords['longitude']
 
-                    # API에서 받은 이름 사용
+                    # API에서 받은 이름, 주소 사용
                     if search_result.get('api_store_name'):
                         final_store_name = search_result['api_store_name']
                         logger.debug(f"API 이름 사용: '{original_name}' -> '{final_store_name}'")
+
+                    if search_result.get('api_store_addr'):
+                        final_store_addr = search_result['api_store_addr']
+                        logger.debug(f"API 주소 사용: '{address}' -> '{final_store_addr}'")
 
                     api_used = search_result['api_used']
                     if api_used == 'naver':
@@ -218,8 +222,8 @@ class BaseCrawler(ABC):
                         'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
                     })
 
-                # 중복 체크 (최종 이름으로)
-                if self.db.store_exists(final_store_name, address, region.id):
+                # 중복 체크
+                if self.db.store_exists(final_store_name, final_store_addr, region.id):
                     logger.debug(f"이미 존재하는 가맹점: {final_store_name}")
                     stats['duplicates'] += 1
                     stats['skipped'] += 1
@@ -231,12 +235,12 @@ class BaseCrawler(ABC):
                     name=category_name
                 )
 
-                # 가맹점 저장 (API에서 받은 이름 사용)
+                # 가맹점 저장
                 self.db.create_store(
-                    name=final_store_name,  # API 이름 사용
+                    name=final_store_name,
                     category=category,
                     region=region,
-                    address=address,
+                    address=final_store_addr,
                     latitude=latitude,
                     longitude=longitude,
                     annual_sales=None,

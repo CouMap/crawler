@@ -151,7 +151,7 @@ class Database:
                 longitude=longitude,
                 annual_sales=annual_sales,
                 business_days=business_days or '월~일',
-                category=category_str,  # 문자열 카테고리
+                category=category_str,
                 is_franchise=is_franchise,
                 opening_hours=opening_hours
             )

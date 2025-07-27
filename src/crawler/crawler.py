@@ -555,8 +555,8 @@ class Crawler(BaseCrawler):
                 counts = result.get('counts', {})
 
                 logger.info(f"데이터 추출 분석:")
-                logger.info(f"  소비쿠폰 원본: {counts.get('mins', 0)}개")
-                logger.info(f"  최종 추출: {extracted}개 (원본 그대로)")
+                logger.info(f"  소비쿠폰: {counts.get('mins', 0)}개")
+                logger.info(f"  최종 추출: {extracted}개")
                 logger.info(f"  화면 표시: {display}개")
 
                 if extracted == display:
