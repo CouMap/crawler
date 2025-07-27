@@ -1,0 +1,216 @@
+name: Crawler
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+  schedule:
+    # 매일 오전 2시에 실행 (UTC 기준)
+    - cron: '0 2 * * *'
+  workflow_dispatch:
+    inputs:
+      crawl_mode:
+        description: '크롤링 모드'
+        required: true
+        default: 'test'
+        type: choice
+        options:
+          - test
+          - single_region
+          - full_crawl
+      province:
+        description: '시/도명 (단일 지역 모드에서 사용)'
+        required: false
+        default: ''
+      district:
+        description: '시/군/구명 (단일 지역 모드에서 사용)'
+        required: false
+        default: ''
+      dong:
+        description: '읍/면/동명 (단일 지역 모드에서 사용)'
+        required: false
+        default: ''
+
+env:
+  PYTHON_VERSION: '3.11'
+
+jobs:
+  test:
+    name: 테스트 실행
+    runs-on: ubuntu-latest
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: test_password
+          MYSQL_DATABASE: coumap_test
+        options: >-
+          --health-cmd="mysqladmin ping --silent"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=3
+        ports:
+          - 3306:3306
+
+    steps:
+    - name: 코드 체크아웃
+      uses: actions/checkout@v4
+
+    - name: Python 설정
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+        cache: 'pip'
+
+    - name: Chrome 브라우저 설치
+      uses: browser-actions/setup-chrome@v1
+
+    - name: 의존성 설치
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+
+    - name: 코드 품질 검사
+      run: |
+        black --check src/ tests/
+        isort --check-only src/ tests/
+        flake8 src/ tests/
+
+    - name: 테스트 환경 설정
+      run: |
+        cp .env.example .env
+        echo "DB_HOST=127.0.0.1" >> .env
+        echo "DB_PORT=3306" >> .env
+        echo "DB_USER=root" >> .env
+        echo "DB_PASSWORD=test_password" >> .env
+        echo "DB_NAME=coumap_test" >> .env
+        echo "NAVER_CLIENT_ID=${{ secrets.NAVER_CLIENT_ID }}" >> .env
+        echo "NAVER_CLIENT_SECRET=${{ secrets.NAVER_CLIENT_SECRET }}" >> .env
+        echo "KAKAO_API_KEY=${{ secrets.KAKAO_API_KEY }}" >> .env
+        echo "HEADLESS=true" >> .env
+
+    - name: 데이터베이스 테이블 생성
+      run: |
+        python -c "
+        from src.database import Database
+        from src.models import Base
+        db = Database()
+        Base.metadata.create_all(db.engine)
+        print('테이블 생성 완료')
+        "
+
+    - name: 단위 테스트 실행
+      run: |
+        pytest tests/ -v --cov=src --cov-report=xml --cov-report=html
+
+    - name: 테스트 커버리지 업로드
+      uses: codecov/codecov-action@v3
+      with:
+        file: ./coverage.xml
+        fail_ci_if_error: false
+
+  crawl:
+    name: 크롤링 실행
+    runs-on: ubuntu-latest
+    needs: test
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: ${{ secrets.DB_PASSWORD }}
+          MYSQL_DATABASE: ${{ secrets.DB_NAME }}
+        options: >-
+          --health-cmd="mysqladmin ping --silent"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=3
+        ports:
+          - 3306:3306
+
+    steps:
+    - name: 코드 체크아웃
+      uses: actions/checkout@v4
+
+    - name: Python 설정
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+        cache: 'pip'
+
+    - name: Chrome 브라우저 설치
+      uses: browser-actions/setup-chrome@v1
+
+    - name: 의존성 설치
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+
+    - name: 환경 변수 설정
+      run: |
+        echo "DB_HOST=127.0.0.1" >> $GITHUB_ENV
+        echo "DB_PORT=3306" >> $GITHUB_ENV
+        echo "DB_USER=root" >> $GITHUB_ENV
+        echo "DB_PASSWORD=${{ secrets.DB_PASSWORD }}" >> $GITHUB_ENV
+        echo "DB_NAME=${{ secrets.DB_NAME }}" >> $GITHUB_ENV
+        echo "NAVER_CLIENT_ID=${{ secrets.NAVER_CLIENT_ID }}" >> $GITHUB_ENV
+        echo "NAVER_CLIENT_SECRET=${{ secrets.NAVER_CLIENT_SECRET }}" >> $GITHUB_ENV
+        echo "KAKAO_API_KEY=${{ secrets.KAKAO_API_KEY }}" >> $GITHUB_ENV
+        echo "HEADLESS=true" >> $GITHUB_ENV
+
+    - name: 데이터베이스 테이블 생성
+      run: |
+        python -c "
+        from src.database import Database
+        from src.models import Base
+        db = Database()
+        Base.metadata.create_all(db.engine)
+        print('테이블 생성 완료')
+        "
+
+    - name: 크롤링 실행
+      run: |
+        python main.py \
+          --mode ${{ github.event.inputs.crawl_mode || 'test' }} \
+          --province "${{ github.event.inputs.province || '' }}" \
+          --district "${{ github.event.inputs.district || '' }}" \
+          --dong "${{ github.event.inputs.dong || '' }}"
+
+    - name: 크롤링 결과 업로드
+      uses: actions/upload-artifact@v3
+      if: always()
+      with:
+        name: crawling-results
+        path: |
+          data/*.csv
+          logs/*.log
+        retention-days: 30
+
+    - name: 크롤링 통계 출력
+      run: |
+        python -c "
+        from src.database import Database
+        db = Database()
+        stats = db.get_statistics()
+        print(f'총 가맹점 수: {stats[\"total_stores\"]}')
+        print(f'좌표 보유 가맹점: {stats[\"stores_with_coordinates\"]}')
+        print(f'성공률: {stats[\"success_rate\"]}%')
+        "
+
+  notification:
+    name: 알림 발송
+    runs-on: ubuntu-latest
+    needs: [test, crawl]
+    if: always() && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
+
+    steps:
+    - name: 결과 알림
+      run: |
+        if [ "${{ needs.crawl.result }}" == "success" ]; then
+          echo "크롤링이 성공적으로 완료되었습니다."
+        else
+          echo "크롤링이 실패했습니다."
+          exit 1
+        fi

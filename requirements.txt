@@ -1,0 +1,33 @@
+# 웹 크롤링
+selenium==4.15.2
+webdriver-manager==4.0.1
+
+# 데이터베이스
+sqlalchemy==2.0.21
+pymysql==1.1.0
+mysqlclient==2.2.0
+
+# HTTP 요청
+requests==2.31.0
+
+# 환경 변수
+python-dotenv==1.0.0
+
+# 로깅
+loguru==0.7.2
+
+# 데이터 처리
+pandas==2.1.1
+
+# 테스트
+pytest==7.4.2
+pytest-cov==4.1.0
+pytest-mock==3.11.1
+
+# 코드 품질
+black==23.9.1
+flake8==6.1.0
+isort==5.12.0
+
+# GitHub Actions
+pytest-github-actions-annotate-failures==0.2.0
