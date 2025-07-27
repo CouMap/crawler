@@ -31,9 +31,10 @@ class IntegratedMapAPI:
             raise ValueError("네이버와 카카오 지도 API 모두 초기화에 실패했습니다.")
 
     def clean_store_name(self, store_name: str) -> str:
-        """가맹점명 정리 - (주), 주식회사 등 제거"""
+        """가맹점명 정리 - (주), 주식회사, 영어명 등 제거"""
         cleaned_name = store_name.strip()
 
+        # 제거할 패턴들
         patterns_to_remove = [
             r'\(주\)',  # (주)
             r'\(株\)',  # (株)
@@ -41,15 +42,17 @@ class IntegratedMapAPI:
             r'㈜\s*',  # ㈜
             r'\s*회사$',  # 끝에 있는 "회사"
             r'\s*코퍼레이션$',  # 끝에 있는 "코퍼레이션"
-            r'\s*corporation$',  # 끝에 있는 "corporation" (대소문자 무관)
+            r'\s*corporation$',  # 끝에 있는 "corporation"
             r'\s*corp\.?$',  # 끝에 있는 "corp" 또는 "corp."
             r'\s*inc\.?$',  # 끝에 있는 "inc" 또는 "inc."
             r'\s*ltd\.?$',  # 끝에 있는 "ltd" 또는 "ltd."
+            r'\([A-Za-z\s]+\)',  # 영어가 포함된 괄호 제거 (예: (McDonald's), (KFC))
         ]
 
         for pattern in patterns_to_remove:
             cleaned_name = re.sub(pattern, '', cleaned_name, flags=re.IGNORECASE)
 
+        # 연속된 공백을 단일 공백으로 변경하고 양끝 공백 제거
         cleaned_name = re.sub(r'\s+', ' ', cleaned_name).strip()
 
         if cleaned_name != store_name:
@@ -111,15 +114,7 @@ class IntegratedMapAPI:
 
     def get_coordinates_by_address(self, address: str) -> Dict[str, Any]:
         """주소로 좌표 조회"""
-        if self.naver_api:
-            logger.debug("네이버 API로 주소 검색 시도...")
-            result = self.naver_api.get_coordinates_by_address(address)
-            if result.get('found'):
-                logger.info(f"네이버 주소 검색 성공: {address}")
-                return result
-            else:
-                logger.warning(f"네이버 주소 검색도 실패: {address}")
-
+        # 카카오 API가 주소 검색에 더 정확함
         if self.kakao_api:
             logger.debug("카카오 API로 주소 검색 시도...")
             result = self.kakao_api.get_coordinates_by_address(address)
@@ -128,6 +123,16 @@ class IntegratedMapAPI:
                 return result
             else:
                 logger.warning(f"카카오 주소 검색 실패: {address}")
+
+        # 카카오 실패시 네이버 시도
+        if self.naver_api:
+            logger.debug("네이버 API로 주소 검색 시도...")
+            result = self.naver_api.get_coordinates_by_address(address)
+            if result.get('found'):
+                logger.info(f"네이버 주소 검색 성공: {address}")
+                return result
+            else:
+                logger.warning(f"네이버 주소 검색도 실패: {address}")
 
         logger.error(f"모든 API 주소 검색 실패: {address}")
         return {'found': False}
