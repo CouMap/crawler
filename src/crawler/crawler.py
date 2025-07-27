@@ -535,7 +535,7 @@ class Crawler(BaseCrawler):
                 }
             }
 
-            // 소비쿠폰만 처리
+            // 소비쿠폰만 처리 (다른 타입들은 제외)
             processData(resultMinsJson, '소비쿠폰');
 
             // 전체 카운트 확인
@@ -568,14 +568,38 @@ class Crawler(BaseCrawler):
 
             result = self.driver.execute_script(script)
 
-            # 추가 로그 출력
             if result:
                 extracted = result.get('extracted_count', 0)
                 display = result.get('display_total', 0)
-                logger.info(f"데이터 추출 결과: {extracted}개 추출 / {display}개 표시")
+                counts = result.get('counts', {})
+
+                logger.info(f"데이터 추출 분석:")
+                logger.info(f"  소비쿠폰 원본: {counts.get('mins', 0)}개")
+                logger.info(f"  최종 추출: {extracted}개")
+                logger.info(f"  화면 표시: {display}개")
 
                 if extracted != display and display > 0:
-                    logger.warning(f"⚠️ 데이터 불일치: 추출({extracted}) vs 표시({display})")
+                    diff = display - extracted
+                    logger.warning(f"데이터 차이: {diff}개 (중복 또는 빈 데이터로 추정)")
+
+                    detail_script = """
+                    // 상세 분석 정보 반환
+                    return {
+                        duplicates: typeof duplicateCount !== 'undefined' ? duplicateCount : 0,
+                        skipped: typeof skippedCount !== 'undefined' ? skippedCount : 0,
+                        processed: typeof processedCount !== 'undefined' ? processedCount : 0
+                    };
+                    """
+
+                    try:
+                        detail_result = self.driver.execute_script(detail_script)
+                        if detail_result:
+                            logger.info(f"  - 중복 제거: {detail_result.get('duplicates', 0)}개")
+                            logger.info(f"  - 빈 데이터: {detail_result.get('skipped', 0)}개")
+                    except:
+                        logger.info(f"  (상세 분석 정보 확인 불가)")
+                else:
+                    logger.info("데이터 추출 완료 - 차이 없음")
 
             return result
 
