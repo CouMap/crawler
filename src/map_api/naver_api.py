@@ -98,20 +98,16 @@ class NaverSearchAPI(BaseMapAPI):
 
         address_parts = address.strip().split()
 
-        # 1단계: 상호명 + 전체 주소
         if address_parts:
             scenarios.append(f"{store_name} {' '.join(address_parts)}")
 
-        # 2단계: 상호명 + 주소 축소
         for i in range(len(address_parts) - 1, 0, -1):
             if i <= len(address_parts):
                 reduced_address = ' '.join(address_parts[:i])
                 scenarios.append(f"{store_name} {reduced_address}")
 
-        # 3단계: 상호명만
         scenarios.append(store_name)
 
-        # 중복 제거하면서 순서 유지
         unique_scenarios = []
         seen = set()
         for scenario in scenarios:
@@ -122,15 +118,44 @@ class NaverSearchAPI(BaseMapAPI):
 
         return unique_scenarios
 
+    def validate_address_match(self, original_address: str, api_address: str) -> bool:
+        """크롤링 주소와 API 주소의 시군구읍면동 일치 여부 확인"""
+        try:
+            from ..utils import AddressParser
+
+            original_parsed = AddressParser.parse_address(original_address)
+            api_parsed = AddressParser.parse_address(api_address)
+
+            if original_parsed.get('province') != api_parsed.get('province'):
+                logger.warning(f"시/도 불일치: 크롤링={original_parsed.get('province')} vs API={api_parsed.get('province')}")
+                return False
+
+            if original_parsed.get('city') != api_parsed.get('city'):
+                logger.warning(f"시/군/구 불일치: 크롤링={original_parsed.get('city')} vs API={api_parsed.get('city')}")
+                return False
+
+            original_town = original_parsed.get('town')
+            api_town = api_parsed.get('town')
+
+            if original_town and api_town:
+                if original_town != api_town:
+                    logger.warning(f"읍/면/동 불일치: 크롤링={original_town} vs API={api_town}")
+                    return False
+
+            logger.debug(f"주소 검증 성공: {original_address} ↔ {api_address}")
+            return True
+
+        except Exception as e:
+            logger.error(f"주소 검증 중 오류: {e}")
+            return False
+
     def search_store_location(self, store_name: str, category: str, address: str) -> Dict[str, Any]:
-        """네이버 검색 API 기반 가맹점 위치 확인 - 축소 전략 사용"""
+        """네이버 검색 API 기반 가맹점 위치 확인"""
         try:
             logger.debug(f"네이버 검색 API 시작: {store_name}")
 
             clean_address = self.clean_address_for_search(address)
-
             search_scenarios = self.create_search_scenarios_with_reduction(store_name, clean_address)
-
             logger.debug(f"검색 시나리오 ({len(search_scenarios)}개): {search_scenarios}")
 
             for i, query in enumerate(search_scenarios, 1):
@@ -141,16 +166,20 @@ class NaverSearchAPI(BaseMapAPI):
                 result = self.get_coordinates_by_keyword(query)
 
                 if result.get('found'):
-                    logger.info(f"네이버 검색 성공 (시나리오 {i}): {query}")
-                    return {
-                        'found': True,
-                        'search_type': f'naver_reduction_{i}',
-                        'query': query,
-                        'coordinates': result,
-                        'api_used': 'naver'
-                    }
+                    api_address = result.get('final_address', '')
+                    if self.validate_address_match(address, api_address):
+                        logger.info(f"네이버 검색 성공 (시나리오 {i}): {query}")
+                        return {
+                            'found': True,
+                            'search_type': f'naver_reduction_{i}',
+                            'query': query,
+                            'coordinates': result,
+                            'api_used': 'naver'
+                        }
+                    else:
+                        logger.warning(f"주소 불일치로 검색 결과 무효: {query}")
+                        continue
 
-            # 모든 시나리오 실패
             failed_queries = ' → '.join(search_scenarios)
             logger.warning(f"모든 축소 검색 실패: {failed_queries}")
 
