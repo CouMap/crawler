@@ -135,7 +135,7 @@ class BaseCrawler(ABC):
         pass
 
     def save_store_data(self, stores_data: List[Dict[str, Any]]) -> Dict[str, int]:
-        """가맹점 데이터 저장"""
+        """가맹점 데이터 저장 - 간소화된 버전"""
         logger.info(f"가맹점 데이터 저장 시작: {len(stores_data)}개")
 
         stats = {
@@ -145,7 +145,8 @@ class BaseCrawler(ABC):
             'naver_success': 0,
             'kakao_success': 0,
             'duplicates': 0,
-            'errors': 0
+            'errors': 0,
+            'new_regions': 0  # 새로 생성된 지역 수
         }
 
         for i, store_data in enumerate(stores_data, 1):
@@ -162,13 +163,17 @@ class BaseCrawler(ABC):
                     stats['skipped'] += 1
                     continue
 
-                # 주소 파싱 - 크롤러의 extract_region_from_address 메서드 사용
-                region = self.extract_region_from_address(address)
-
-                if not region:
-                    logger.warning(f"지역 정보를 찾을 수 없음: {address}")
+                # 주소 파싱 - 간단한 버전
+                parsed_address = self.extract_region_from_address(address)
+                if not parsed_address:
+                    logger.warning(f"주소 파싱 실패: {address}")
                     stats['skipped'] += 1
                     continue
+
+                province, city, town = parsed_address
+
+                # 지역 조회 또는 생성 (핵심 변경!)
+                region = self.db.get_or_create_region(province, city, town)
 
                 # 중복 체크
                 if self.db.store_exists(name, address, region.id):
@@ -214,13 +219,13 @@ class BaseCrawler(ABC):
                         'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
                     })
 
-                # 카테고리 생성/조회 (description 파라미터 제거)
+                # 카테고리 생성/조회
                 category = self.db.create_category(
                     code=category_name.upper(),
                     name=category_name
                 )
 
-                # 가맹점 저장 (실제 DB 스키마에 맞게 수정)
+                # 가맹점 저장
                 self.db.create_store(
                     name=name,
                     category=category,
@@ -228,11 +233,11 @@ class BaseCrawler(ABC):
                     address=address,
                     latitude=latitude,
                     longitude=longitude,
-                    annual_sales=None,  # 크롤링된 데이터에 없음
-                    business_days='월~일',  # 기본값
-                    category_str=category_name,  # 문자열 카테고리
-                    is_franchise=True,  # 기본값
-                    opening_hours=None  # 크롤링된 데이터에 없음
+                    annual_sales=None,
+                    business_days='월~일',
+                    category_str=category_name,
+                    is_franchise=True,
+                    opening_hours=None
                 )
 
                 stats['saved'] += 1
@@ -249,7 +254,7 @@ class BaseCrawler(ABC):
         # 통계 업데이트
         self.crawling_stats.update(stats)
 
-        logger.info(f"가맹점 저장 완료 - 성공: {stats['saved']}, 실패: {stats['skipped']}")
+        logger.info(f"가맹점 저장 완료 - 성공: {stats['saved']}, 신규 지역: {stats['new_regions']}")
         return stats
 
     def wait_with_delay(self, delay: float = None):

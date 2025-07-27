@@ -56,83 +56,45 @@ class Database:
             logger.error(f"테이블 생성 실패: {e}")
             raise
 
-    def get_region_by_name(self, province: str, city: str, town: Optional[str] = None) -> Optional[Region]:
-        """지역명으로 region 조회 - 개선된 버전"""
+    def get_or_create_region(self, province: str, city: str, town: Optional[str] = None) -> Region:
+        """지역 조회 또는 생성"""
+        import time
+
         with self.get_session() as session:
-            logger.debug(f"지역 검색: {province} > {city} > {town or '없음'}")
-
-            # 1차: 정확한 매칭 시도 (town 포함)
-            if town:
-                result = session.query(Region).filter(
-                    Region.province == province,
-                    Region.city == city,
-                    Region.town == town
-                ).first()
-
-                if result:
-                    logger.debug(f"1차 정확 매칭 성공: {result.province} {result.city} {result.town}")
-                    session.expunge(result)
-                    return result
-
-            # 2차: 숫자 제거된 동명으로 검색 (개포1동 → 개포동)
-            if town and re.search(r'\d', town):
-                town_without_number = re.sub(r'\d+', '', town)
-                logger.debug(f"숫자 제거된 동명으로 검색: {town} → {town_without_number}")
-
-                result = session.query(Region).filter(
-                    Region.province == province,
-                    Region.city == city,
-                    Region.town == town_without_number
-                ).first()
-
-                if result:
-                    logger.debug(f"2차 숫자제거 매칭 성공: {result.province} {result.city} {result.town}")
-                    session.expunge(result)
-                    return result
-
-            # 3차: 시/구만으로 매칭 후 유사한 동 찾기
-            base_query = session.query(Region).filter(
-                Region.province == province,
-                Region.city == city
-            )
-
-            if town:
-                # 3-1: town과 유사한 동 찾기 (Like 검색)
-                result = base_query.filter(Region.town.like(f'%{town}%')).first()
-                if result:
-                    logger.debug(f"3차 유사 동 매칭 성공: {result.province} {result.city} {result.town}")
-                    session.expunge(result)
-                    return result
-
-                # 3-2: 숫자 제거된 동명과 유사한 동 찾기
-                if re.search(r'\d', town):
-                    town_without_number = re.sub(r'\d+', '', town)
-                    result = base_query.filter(Region.town.like(f'%{town_without_number}%')).first()
-                    if result:
-                        logger.debug(f"3차 숫자제거 유사 매칭 성공: {result.province} {result.city} {result.town}")
-                        session.expunge(result)
-                        return result
-
-            # 4차: 해당 시/구의 첫 번째 동 (대표 동)
-            result = base_query.first()
-            if result:
-                logger.warning(f"4차 대표 동 매칭: {result.province} {result.city} {result.town} (원래 요청: {town})")
-                session.expunge(result)
-                return result
-
-            # 5차: Like 검색으로 유연한 매칭
+            # 1차: 정확한 매칭 시도
             result = session.query(Region).filter(
-                Region.province.like(f'%{province}%'),
-                Region.city.like(f'%{city}%')
+                Region.province == province,
+                Region.city == city,
+                Region.town == town
             ).first()
 
             if result:
-                logger.warning(f"5차 유연한 매칭: {result.province} {result.city} {result.town}")
+                logger.debug(f"기존 지역 매칭: {result.province} {result.city} {result.town}")
                 session.expunge(result)
                 return result
 
-            logger.warning(f"모든 매칭 실패: {province} {city} {town}")
-            return None
+            # 2차: 없으면 새로 생성
+            logger.info(f"새 지역 생성: {province} {city} {town}")
+
+            # 지역 코드 생성 (유니크하게)
+            import hashlib
+            code_str = f"{province}{city}{town or ''}{int(time.time())}"
+            code = hashlib.md5(code_str.encode()).hexdigest()[:10]
+
+            new_region = Region(
+                province=province,
+                city=city,
+                town=town,
+                code=code
+            )
+
+            session.add(new_region)
+            session.flush()
+            session.expunge(new_region)
+
+            logger.info(f"지역 생성 완료: ID={new_region.id}, {province} {city} {town}")
+            return new_region
+
 
     def get_all_regions(self) -> List[Region]:
         """모든 지역 조회"""
