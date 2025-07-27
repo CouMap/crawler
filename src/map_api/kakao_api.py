@@ -25,7 +25,11 @@ class KakaoMapAPI(BaseMapAPI):
     def get_coordinates_by_keyword(self, query: str) -> Dict[str, Any]:
         """카카오 키워드 검색 API로 좌표 조회"""
         try:
-            params = {'query': query, 'size': 1}
+            params = {
+                'query': query,
+                'size': 1,
+                'sort': 'accuracy'
+            }
             response = requests.get(
                 self.keyword_url,
                 headers=self.headers,
@@ -94,42 +98,69 @@ class KakaoMapAPI(BaseMapAPI):
         finally:
             self.rate_limit()
 
+    def create_search_scenarios_with_reduction(self, store_name: str, address: str) -> list:
+        """검색어 축소 전략으로 시나리오 생성"""
+        scenarios = []
+
+        address_parts = address.strip().split()
+
+        # 1단계: 상호명 + 전체 주소
+        if address_parts:
+            scenarios.append(f"{store_name} {' '.join(address_parts)}")
+
+        # 2단계: 상호명 + 주소 축소
+        for i in range(len(address_parts) - 1, 0, -1):
+            if i <= len(address_parts):
+                reduced_address = ' '.join(address_parts[:i])
+                scenarios.append(f"{store_name} {reduced_address}")
+
+        # 3단계: 상호명만
+        scenarios.append(store_name)
+
+        # 중복 제거하면서 순서 유지
+        unique_scenarios = []
+        seen = set()
+        for scenario in scenarios:
+            scenario = scenario.strip()
+            if scenario and scenario not in seen:
+                unique_scenarios.append(scenario)
+                seen.add(scenario)
+
+        return unique_scenarios
+
     def search_store_location(self, store_name: str, category: str, address: str) -> Dict[str, Any]:
-        """카카오 키워드 검색 기반 가맹점 위치 확인"""
+        """카카오 키워드 검색 기반 가맹점 위치 확인 - 축소 전략 사용"""
         try:
             logger.debug(f"카카오 키워드 검색 시작: {store_name}")
-
-            # 주소 정리
             clean_address = self.clean_address_for_search(address)
-            dong = self.extract_dong_from_address(clean_address)
-
-            # 검색 시나리오들
-            search_scenarios = [
-                f"{store_name} {dong}".strip(),
-                f"{store_name} {category} {dong}".strip(),
-            ]
+            search_scenarios = self.create_search_scenarios_with_reduction(store_name, clean_address)
+            logger.debug(f"카카오 검색 시나리오 ({len(search_scenarios)}개): {search_scenarios}")
 
             for i, query in enumerate(search_scenarios, 1):
                 if not query:
                     continue
 
-                logger.debug(f"{i}차 카카오 검색: {query}")
+                logger.debug(f"{i}차 카카오 검색 (축소전략): {query}")
                 result = self.get_coordinates_by_keyword(query)
 
                 if result.get('found'):
+                    logger.info(f"카카오 검색 성공 (시나리오 {i}): {query}")
                     return {
                         'found': True,
-                        'search_type': f'kakao_scenario_{i}',
+                        'search_type': f'kakao_reduction_{i}',
                         'query': query,
                         'coordinates': result,
                         'api_used': 'kakao'
                     }
 
             # 모든 시나리오 실패
+            failed_queries = ' → '.join(search_scenarios)
+            logger.warning(f"모든 카카오 축소 검색 실패: {failed_queries}")
+
             return {
                 'found': False,
-                'search_type': 'kakao_failed',
-                'query': ' / '.join(search_scenarios),
+                'search_type': 'kakao_reduction_failed',
+                'query': failed_queries,
                 'coordinates': None,
                 'api_used': 'kakao'
             }
