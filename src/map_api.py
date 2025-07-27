@@ -9,8 +9,8 @@ logger = logging.getLogger(__name__)
 class NaverMapAPI:
     def __init__(self):
         self.headers = {
-            'X-NCP-APIGW-API-KEY-ID': NAVER_CLIENT_ID,
-            'X-NCP-APIGW-API-KEY': NAVER_CLIENT_SECRET,
+            'X-Naver-Client-Id': api_config.NAVER_CLIENT_ID,
+            'X-Naver-Client-Secret': api_config.NAVER_CLIENT_SECRET,
             'Accept': 'application/json'
         }
         self.geocoding_url = 'https://naveropenapi.apigw.ntruss.com/map-geocode/v2/geocode'

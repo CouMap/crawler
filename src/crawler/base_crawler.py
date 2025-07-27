@@ -135,7 +135,7 @@ class BaseCrawler(ABC):
         pass
 
     def save_store_data(self, stores_data: List[Dict[str, Any]]) -> Dict[str, int]:
-        """가맹점 데이터 저장 - 간소화된 버전"""
+        """가맹점 데이터 저장 - API 이름 사용"""
         logger.info(f"가맹점 데이터 저장 시작: {len(stores_data)}개")
 
         stats = {
@@ -146,7 +146,7 @@ class BaseCrawler(ABC):
             'kakao_success': 0,
             'duplicates': 0,
             'errors': 0,
-            'new_regions': 0  # 새로 생성된 지역 수
+            'new_regions': 0
         }
 
         for i, store_data in enumerate(stores_data, 1):
@@ -154,16 +154,16 @@ class BaseCrawler(ABC):
                 logger.debug(f"[{i}/{len(stores_data)}] 처리 중: {store_data.get('name', '이름없음')}")
 
                 # 필수 정보 확인
-                name = store_data.get('name', '').strip()
+                original_name = store_data.get('name', '').strip()
                 address = store_data.get('address', '').strip()
                 category_name = store_data.get('category', '기타').strip()
 
-                if not name or not address:
-                    logger.warning(f"필수 정보 누락: {name} / {address}")
+                if not original_name or not address:
+                    logger.warning(f"필수 정보 누락: {original_name} / {address}")
                     stats['skipped'] += 1
                     continue
 
-                # 주소 파싱 - 간단한 버전
+                # 주소 파싱
                 parsed_address = self.extract_region_from_address(address)
                 if not parsed_address:
                     logger.warning(f"주소 파싱 실패: {address}")
@@ -172,26 +172,25 @@ class BaseCrawler(ABC):
 
                 province, city, town = parsed_address
 
-                # 지역 조회 또는 생성 (핵심 변경!)
+                # 지역 조회 또는 생성
                 region = self.db.get_or_create_region(province, city, town)
 
-                # 중복 체크
-                if self.db.store_exists(name, address, region.id):
-                    logger.debug(f"이미 존재하는 가맹점: {name}")
-                    stats['duplicates'] += 1
-                    stats['skipped'] += 1
-                    continue
-
                 # 지도 검색
-                search_result = self.map_api.search_location(name, category_name, address)
+                search_result = self.map_api.search_location(original_name, category_name, address)
 
                 latitude = None
                 longitude = None
+                final_store_name = original_name  # 기본값은 크롤링한 이름
 
                 if search_result['found']:
                     coords = search_result['coordinates']
                     latitude = coords['latitude']
                     longitude = coords['longitude']
+
+                    # API에서 받은 이름 사용
+                    if search_result.get('api_store_name'):
+                        final_store_name = search_result['api_store_name']
+                        logger.debug(f"API 이름 사용: '{original_name}' -> '{final_store_name}'")
 
                     api_used = search_result['api_used']
                     if api_used == 'naver':
@@ -201,12 +200,12 @@ class BaseCrawler(ABC):
 
                     logger.debug(f"지도 검색 성공: {api_used.upper()}")
                 else:
-                    logger.warning(f"지도 검색 실패: {name}")
+                    logger.warning(f"지도 검색 실패: {original_name}")
                     stats['api_failed'] += 1
 
                     # 실패 데이터 저장
                     self.failed_stores.append({
-                        'store_name': name,
+                        'store_name': original_name,
                         'address': address,
                         'category': category_name,
                         'phone': store_data.get('phone', ''),
@@ -219,15 +218,22 @@ class BaseCrawler(ABC):
                         'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
                     })
 
+                # 중복 체크 (최종 이름으로)
+                if self.db.store_exists(final_store_name, address, region.id):
+                    logger.debug(f"이미 존재하는 가맹점: {final_store_name}")
+                    stats['duplicates'] += 1
+                    stats['skipped'] += 1
+                    continue
+
                 # 카테고리 생성/조회
                 category = self.db.create_category(
                     code=category_name.upper(),
                     name=category_name
                 )
 
-                # 가맹점 저장
+                # 가맹점 저장 (API에서 받은 이름 사용)
                 self.db.create_store(
-                    name=name,
+                    name=final_store_name,  # API 이름 사용
                     category=category,
                     region=region,
                     address=address,
@@ -241,7 +247,7 @@ class BaseCrawler(ABC):
                 )
 
                 stats['saved'] += 1
-                logger.debug(f"저장 완료: {name}")
+                logger.debug(f"저장 완료: {final_store_name}")
 
             except Exception as e:
                 logger.error(f"가맹점 저장 실패 - {store_data.get('name', 'Unknown')}: {e}")
