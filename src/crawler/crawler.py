@@ -572,9 +572,13 @@ class Crawler(BaseCrawler):
 
             # 지역 목록 가져오기
             provinces = self.get_all_regions_from_site()
+            logger.info(f"KB사이트에서 가져온 시/도 목록: {[p['name'] for p in provinces]}")
 
             for province in provinces:
+                logger.info(f"현재 검사 중인 시/도: '{province['name']}', 찾는 지역: '{province_name}'")
+
                 if province_name and province_name not in province['name']:
+                    logger.info(f"'{province['name']}'은 '{province_name}'과 매칭되지 않음 - 건너뛰기")
                     continue
 
                 logger.info(f"시/도 크롤링: {province['name']}")
