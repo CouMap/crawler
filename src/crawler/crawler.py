@@ -464,7 +464,6 @@ class Crawler(BaseCrawler):
             logger.error(f"검색 실행 실패: {e}")
 
     def extract_data(self) -> Dict[str, Any]:
-        """JavaScript 변수에서 결과 추출 - 개수 제한 없음"""
         try:
             script = """
             var allResults = [];
@@ -489,13 +488,13 @@ class Crawler(BaseCrawler):
                 return false;
             }
 
-            // 데이터 처리 함수 - 개수 제한 제거
+            // 데이터 처리 함수
             function processData(data, type) {
                 if (typeof data !== 'undefined' && Array.isArray(data) && data.length > 0) {
                     console.log(type + ' 원본 데이터:', data.length + '개');
                     var processedCount = 0;
 
-                    // 모든 데이터 처리 (50개 제한 제거)
+                    // 모든 데이터 처리
                     for (var i = 0; i < data.length; i++) {
                         var item = data[i];
                         if (item && item.content) {
@@ -521,11 +520,19 @@ class Crawler(BaseCrawler):
                 }
             }
 
-            // 각 데이터 타입별 처리
+            // 소비쿠폰만 처리 (다른 타입들은 제외)
             processData(resultMinsJson, '소비쿠폰');
-            processData(resultGpsJson, '착한가격업소');
-            processData(resultOnnrJson, '온누리상품권');
-            processData(resultTrdtJson, '전통시장');
+
+            // 다른 타입들 확인만 하고 처리하지 않음
+            if (typeof resultGpsJson !== 'undefined' && Array.isArray(resultGpsJson) && resultGpsJson.length > 0) {
+                console.log('착한가격업소 데이터 발견했지만 건너뛰기:', resultGpsJson.length + '개');
+            }
+            if (typeof resultOnnrJson !== 'undefined' && Array.isArray(resultOnnrJson) && resultOnnrJson.length > 0) {
+                console.log('온누리상품권 데이터 발견했지만 건너뛰기:', resultOnnrJson.length + '개');
+            }
+            if (typeof resultTrdtJson !== 'undefined' && Array.isArray(resultTrdtJson) && resultTrdtJson.length > 0) {
+                console.log('전통시장 데이터 발견했지만 건너뛰기:', resultTrdtJson.length + '개');
+            }
 
             // 전체 카운트 확인
             var totalCount = document.querySelector('[data-comma="total"]');
@@ -538,7 +545,7 @@ class Crawler(BaseCrawler):
             // 차이가 있으면 경고
             var displayTotal = parseInt(totalText.replace(/,/g, '')) || 0;
             if (allResults.length !== displayTotal && displayTotal > 0) {
-                console.log('⚠️ 경고: 추출된 데이터(' + allResults.length + '개)와 표시 총계(' + displayTotal + '개)가 다름');
+                console.log('경고: 추출된 데이터(' + allResults.length + '개)와 표시 총계(' + displayTotal + '개)가 다름');
             }
 
             return {
@@ -557,7 +564,6 @@ class Crawler(BaseCrawler):
 
             result = self.driver.execute_script(script)
 
-            # 추가 로그 출력
             if result:
                 extracted = result.get('extracted_count', 0)
                 display = result.get('display_total', 0)
