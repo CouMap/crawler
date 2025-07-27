@@ -493,6 +493,8 @@ class Crawler(BaseCrawler):
                 if (typeof data !== 'undefined' && Array.isArray(data) && data.length > 0) {
                     console.log(type + ' 원본 데이터:', data.length + '개');
                     var processedCount = 0;
+                    var skippedCount = 0;
+                    var duplicateCount = 0;
 
                     // 모든 데이터 처리
                     for (var i = 0; i < data.length; i++) {
@@ -500,6 +502,11 @@ class Crawler(BaseCrawler):
                         if (item && item.content) {
                             var name = item.content.title || '';
                             var address = item.content.address || '';
+
+                            if (!name || !address) {
+                                skippedCount++;
+                                continue;
+                            }
 
                             if (!isDuplicate(name, address)) {
                                 allResults.push({
@@ -511,28 +518,25 @@ class Crawler(BaseCrawler):
                                     distance: item.content.distance || ''
                                 });
                                 processedCount++;
+                            } else {
+                                duplicateCount++;
                             }
+                        } else {
+                            skippedCount++;
                         }
                     }
-                    console.log(type + ' 처리완료:', processedCount + '개 (중복제거 후)');
+                    console.log(type + ' 처리결과:');
+                    console.log('  - 처리완료: ' + processedCount + '개');
+                    console.log('  - 중복제거: ' + duplicateCount + '개');
+                    console.log('  - 빈데이터: ' + skippedCount + '개');
+                    console.log('  - 총계확인: ' + (processedCount + duplicateCount + skippedCount) + ' = ' + data.length);
                 } else {
                     console.log(type + ' 데이터 없음');
                 }
             }
 
-            // 소비쿠폰만 처리 (다른 타입들은 제외)
+            // 소비쿠폰만 처리
             processData(resultMinsJson, '소비쿠폰');
-
-            // 다른 타입들 확인만 하고 처리하지 않음
-            if (typeof resultGpsJson !== 'undefined' && Array.isArray(resultGpsJson) && resultGpsJson.length > 0) {
-                console.log('착한가격업소 데이터 발견했지만 건너뛰기:', resultGpsJson.length + '개');
-            }
-            if (typeof resultOnnrJson !== 'undefined' && Array.isArray(resultOnnrJson) && resultOnnrJson.length > 0) {
-                console.log('온누리상품권 데이터 발견했지만 건너뛰기:', resultOnnrJson.length + '개');
-            }
-            if (typeof resultTrdtJson !== 'undefined' && Array.isArray(resultTrdtJson) && resultTrdtJson.length > 0) {
-                console.log('전통시장 데이터 발견했지만 건너뛰기:', resultTrdtJson.length + '개');
-            }
 
             // 전체 카운트 확인
             var totalCount = document.querySelector('[data-comma="total"]');
@@ -564,6 +568,7 @@ class Crawler(BaseCrawler):
 
             result = self.driver.execute_script(script)
 
+            # 추가 로그 출력
             if result:
                 extracted = result.get('extracted_count', 0)
                 display = result.get('display_total', 0)
