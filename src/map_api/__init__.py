@@ -77,8 +77,10 @@ class IntegratedMapAPI:
                 # API에서 받은 이름을 사용
                 if 'coordinates' in naver_result and 'place_name' in naver_result['coordinates']:
                     naver_result['api_store_name'] = naver_result['coordinates']['place_name']
+                    naver_result['api_store_addr'] = naver_result['coordinates']['road_address']
                 else:
                     naver_result['api_store_name'] = store_name
+                    naver_result['api_store_addr'] = address
                 return naver_result
             else:
                 logger.warning(f"네이버 검색 API 실패: {store_name}")
@@ -93,8 +95,10 @@ class IntegratedMapAPI:
                 # API에서 받은 이름을 사용
                 if 'coordinates' in kakao_result and 'place_name' in kakao_result['coordinates']:
                     kakao_result['api_store_name'] = kakao_result['coordinates']['place_name']
+                    kakao_result['api_store_addr'] = kakao_result['coordinates']['road_address_name']
                 else:
                     kakao_result['api_store_name'] = store_name
+                    kakao_result['api_store_addr'] = address
                 return kakao_result
             else:
                 logger.warning(f"카카오 지도 검색도 실패: {store_name}")
@@ -109,7 +113,8 @@ class IntegratedMapAPI:
             'api_used': 'none',
             'original_name': store_name,
             'cleaned_name': cleaned_store_name,
-            'api_store_name': store_name  # 실패시 원본 이름 사용
+            'api_store_name': store_name,
+            'api_store_addr': address
         }
 
     def get_coordinates_by_address(self, address: str) -> Dict[str, Any]:
