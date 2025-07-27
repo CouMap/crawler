@@ -62,6 +62,15 @@ class NaverSearchAPI(BaseMapAPI):
                             'found': True
                         }
 
+                # 200 응답이지만 검색 결과 없음 - 이건 오류가 아님!
+                logger.debug(f"네이버 API 검색 결과 없음: {query}")
+                return {
+                    'found': False,
+                    'error': 'No results found',
+                    'query': query
+                }
+
+            # 200이 아닌 경우만 오류 처리
             return self.handle_api_error(response, query)
 
         except Exception as e:
