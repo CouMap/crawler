@@ -42,13 +42,12 @@ jobs:
         env:
           MYSQL_ROOT_PASSWORD: test_password
           MYSQL_DATABASE: coumap_test
-          MYSQL_AUTHENTICATION_PLUGIN: mysql_native_password
+          MYSQL_ROOT_HOST: '%'
         options: >-
           --health-cmd="mysqladmin ping --silent"
           --health-interval=10s
           --health-timeout=5s
           --health-retries=3
-          --default-authentication-plugin=mysql_native_password
         ports:
           - 3306:3306
 
@@ -112,13 +111,12 @@ jobs:
         env:
           MYSQL_ROOT_PASSWORD: ${{ secrets.DB_PASSWORD }}
           MYSQL_DATABASE: ${{ secrets.DB_NAME }}
-          MYSQL_AUTHENTICATION_PLUGIN: mysql_native_password
+          MYSQL_ROOT_HOST: '%'
         options: >-
           --health-cmd="mysqladmin ping --silent"
           --health-interval=10s
           --health-timeout=5s
           --health-retries=3
-          --default-authentication-plugin=mysql_native_password
         ports:
           - 3306:3306
 
