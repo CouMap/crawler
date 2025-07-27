@@ -245,7 +245,6 @@ class AddressParser:
     @classmethod
     def _similar_town(cls, town1: str, town2: str) -> bool:
         """동명 유사성 검사"""
-        # 숫자 제거 후 비교 (개포1동 vs 개포동)
         clean1 = re.sub(r'\d+', '', town1)
         clean2 = re.sub(r'\d+', '', town2)
 

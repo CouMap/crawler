@@ -81,7 +81,7 @@ def run_crawler(mode: str, province: str = None, district: str = None, dong: str
             stats = crawler.crawl_single_region(province, district, dong)
         elif mode == "test":
             logger.info("테스트 크롤링 시작...")
-            stats = crawler.crawl_single_region("서울", "강남구", "개포동")
+            stats = crawler.crawl_single_region("서울", "강남구", "일원본동")
         else:
             logger.error(f"알 수 없는 모드: {mode}")
             return False
@@ -181,7 +181,7 @@ def main():
 
     elif args.mode == 'test':
         # 테스트 크롤링
-        logger.info("테스트 모드: 서울 강남구 개포동 크롤링")
+        logger.info("테스트 모드: 서울 강남구 일원본동 크롤링")
         success = run_crawler('test')
 
     elif args.mode == 'single_region':
