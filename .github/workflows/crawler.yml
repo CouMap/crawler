@@ -35,59 +35,49 @@ env:
 jobs:
   test:
     name: 테스트 실행
-    runs-on: ubuntu-latest
-    services:
-      mysql:
-        image: mysql:8.0
-        env:
-          MYSQL_ROOT_PASSWORD: test_password
-          MYSQL_DATABASE: coumap_test
-          MYSQL_ROOT_HOST:  q
-        options: >-
-          --health-cmd="mysqladmin ping --silent"
-          --health-interval=10s
-          --health-timeout=5s
-          --health-retries=3
-        ports:
-          - 3306:3306
+    runs-on: self-hosted
 
     steps:
     - name: 코드 체크아웃
       uses: actions/checkout@v4
 
-    - name: Python 설정
-      uses: actions/setup-python@v4
-      with:
-        python-version: ${{ env.PYTHON_VERSION }}
-        cache: 'pip'
-
-    - name: Chrome 브라우저 설치
-      uses: browser-actions/setup-chrome@v1
+    - name: Python 환경 확인
+      run: |
+        python3 --version
+        pip3 --version
 
     - name: 의존성 설치
       run: |
-        python -m pip install --upgrade pip
-        pip install -r requirements.txt
+        pip3 install -r requirements.txt
 
-    - name: 코드 품질 검사 (선택적)
+    - name: 테스트 환경 설정 (기존 MariaDB 사용)
       run: |
-        echo "코드 품질 검사 건너뜀"
-
-    - name: 테스트 환경 설정
-      run: |
-        echo "DB_HOST=127.0.0.1" >> $GITHUB_ENV
-        echo "DB_PORT=3306" >> $GITHUB_ENV
-        echo "DB_USER=root" >> $GITHUB_ENV
-        echo "DB_PASSWORD=test_password" >> $GITHUB_ENV
-        echo "DB_NAME=coumap_test" >> $GITHUB_ENV
+        echo "DB_HOST=localhost" >> $GITHUB_ENV
+        echo "DB_PORT=3308" >> $GITHUB_ENV
+        echo "DB_USER=${{ secrets.DB_USER }}" >> $GITHUB_ENV
+        echo "DB_PASSWORD=${{ secrets.DB_PASSWORD }}" >> $GITHUB_ENV
+        echo "DB_NAME=coumap" >> $GITHUB_ENV
         echo "NAVER_CLIENT_ID=${{ secrets.NAVER_CLIENT_ID }}" >> $GITHUB_ENV
         echo "NAVER_CLIENT_SECRET=${{ secrets.NAVER_CLIENT_SECRET }}" >> $GITHUB_ENV
         echo "KAKAO_API_KEY=${{ secrets.KAKAO_API_KEY }}" >> $GITHUB_ENV
         echo "HEADLESS=true" >> $GITHUB_ENV
 
+    - name: DB 연결 테스트
+      run: |
+        python3 -c "
+        from src.database import Database
+        try:
+            db = Database()
+            print('MariaDB 연결 성공!')
+            print(f'연결 정보: {db.engine.url}')
+        except Exception as e:
+            print(f'DB 연결 실패: {e}')
+            raise
+        "
+
     - name: 데이터베이스 테이블 생성
       run: |
-        python -c "
+        python3 -c "
         from src.database import Database
         from src.models import Base
         db = Database()
@@ -101,68 +91,56 @@ jobs:
 
   crawl:
     name: 크롤링 실행
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     if: github.event_name == 'workflow_dispatch'
-
-    services:
-      mysql:
-        image: mysql:8.0
-        env:
-            MYSQL_ROOT_PASSWORD: ${{ secrets.DB_PASSWORD }}
-            MYSQL_DATABASE: ${{ secrets.DB_NAME }}
-            MYSQL_USER: ${{ secrets.DB_USER }}
-            MYSQL_PASSWORD: ${{ secrets.DB_PASSWORD }}
-        options: >-
-          --health-cmd="mysqladmin ping --silent"
-          --health-interval=10s
-          --health-timeout=5s
-          --health-retries=3
-        ports:
-          - 3308:3306
+    # services 섹션 제거! (기존 MariaDB 사용)
 
     steps:
     - name: 코드 체크아웃
       uses: actions/checkout@v4
 
-    - name: Python 설정
-      uses: actions/setup-python@v4
-      with:
-        python-version: ${{ env.PYTHON_VERSION }}
-        cache: 'pip'
+    - name: Python 환경 확인
+      run: |
+        python3 --version
+        pip3 --version
 
-    - name: Chrome 브라우저 설치
-      uses: browser-actions/setup-chrome@v1
+    - name: Chrome 설치 확인
+      run: |
+        google-chrome --version || chromium --version || echo "Chrome/Chromium 수동 설치 필요"
 
     - name: 의존성 설치
       run: |
-        python -m pip install --upgrade pip
-        pip install -r requirements.txt
+        pip3 install -r requirements.txt
 
-    - name: 환경 변수 설정
+    - name: 환경 변수 설정 (기존 MariaDB 사용)
       run: |
-        echo "DB_HOST=${{ secrets.DB_HOST }}" >> $GITHUB_ENV 
-        echo "DB_PORT=${{ secrets.DB_PORT }}" >> $GITHUB_ENV
-        echo "DB_USER=${{ secrets.DB_USER }}" >> $GITHUB_ENV 
+        echo "DB_HOST=localhost" >> $GITHUB_ENV
+        echo "DB_PORT=3308" >> $GITHUB_ENV
+        echo "DB_USER=${{ secrets.DB_USER }}" >> $GITHUB_ENV
         echo "DB_PASSWORD=${{ secrets.DB_PASSWORD }}" >> $GITHUB_ENV
-        echo "DB_NAME=${{ secrets.DB_NAME }}" >> $GITHUB_ENV
+        echo "DB_NAME=coumap" >> $GITHUB_ENV
         echo "NAVER_CLIENT_ID=${{ secrets.NAVER_CLIENT_ID }}" >> $GITHUB_ENV
         echo "NAVER_CLIENT_SECRET=${{ secrets.NAVER_CLIENT_SECRET }}" >> $GITHUB_ENV
         echo "KAKAO_API_KEY=${{ secrets.KAKAO_API_KEY }}" >> $GITHUB_ENV
         echo "HEADLESS=true" >> $GITHUB_ENV
 
-    - name: 데이터베이스 테이블 생성
+    - name: DB 연결 테스트
       run: |
-        python -c "
+        python3 -c "
         from src.database import Database
-        from src.models import Base
-        db = Database()
-        Base.metadata.create_all(db.engine)
-        print('테이블 생성 완료')
+        try:
+            db = Database()
+            print('MariaDB 연결 성공!')
+            stats = db.get_statistics()
+            print(f'현재 가맹점 수: {stats[\"total_stores\"]}')
+        except Exception as e:
+            print(f'DB 연결 실패: {e}')
+            raise
         "
 
     - name: 크롤링 실행
       run: |
-        python main.py \
+        python3 main.py \
           --mode ${{ github.event.inputs.crawl_mode || 'test' }} \
           --province "${{ github.event.inputs.province || '' }}" \
           --district "${{ github.event.inputs.district || '' }}" \
@@ -180,7 +158,7 @@ jobs:
 
     - name: 크롤링 통계 출력
       run: |
-        python -c "
+        python3 -c "
         from src.database import Database
         db = Database()
         stats = db.get_statistics()
@@ -191,7 +169,7 @@ jobs:
 
   notification:
     name: 알림 발송
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     needs: [crawl]
     if: always() && github.event_name == 'workflow_dispatch'
 
