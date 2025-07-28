@@ -1172,15 +1172,62 @@ class Crawler(BaseCrawler):
                         selected_dong = self.select_dong_and_search(dong['index'])
 
                         if selected_dong:
-                            # 데이터 추출
-                            data = self.extract_data()
+                            # 데이터 크기 확인 후 적절한 방법 선택
+                            total_count = self.get_total_data_count()
+                            logger.info(f"{dong['name']} 데이터 개수: {total_count}개")
+
+                            # 500개 이상이면 페이지네이션 적용
+                            if total_count > 500:
+                                logger.info(f"대용량 데이터 감지 ({total_count}개), 페이지네이션 모드 적용")
+                                data = self.extract_data_with_pagination(batch_size=200)
+                            else:
+                                logger.info(f"일반 크기 데이터 ({total_count}개), 기본 모드 적용")
+                                data = self.extract_data()
 
                             if data and data.get('results'):
                                 stores_count = len(data['results'])
                                 logger.info(f"{stores_count}개 가맹점 발견")
 
-                                # 데이터베이스 저장
-                                save_stats = self.save_store_data(data['results'])
+                                # 대용량 데이터는 배치로 저장
+                                if stores_count > 100:
+                                    logger.info("대용량 데이터 배치 저장 시작")
+                                    total_saved = 0
+                                    total_naver = 0
+                                    total_kakao = 0
+                                    total_failed = 0
+
+                                    # 50개씩 배치 저장
+                                    for i in range(0, stores_count, 50):
+                                        batch = data['results'][i:i + 50]
+                                        batch_num = (i // 50) + 1
+                                        total_batches = (stores_count + 49) // 50
+
+                                        logger.info(f"배치 저장 {batch_num}/{total_batches}: {len(batch)}개")
+                                        save_stats = self.save_store_data(batch)
+
+                                        total_saved += save_stats['saved']
+                                        total_naver += save_stats['naver_success']
+                                        total_kakao += save_stats['kakao_success']
+                                        total_failed += save_stats['api_failed']
+
+                                        # 진행률 출력
+                                        progress = (i + len(batch)) / stores_count * 100
+                                        logger.info(f"저장 진행률: {progress:.1f}% (누적: {total_saved}개)")
+
+                                        # 메모리 정리 및 대기
+                                        import gc
+                                        gc.collect()
+                                        time.sleep(0.5)
+
+                                    save_stats = {
+                                        'saved': total_saved,
+                                        'naver_success': total_naver,
+                                        'kakao_success': total_kakao,
+                                        'api_failed': total_failed
+                                    }
+                                else:
+                                    # 일반 크기는 한 번에 저장
+                                    save_stats = self.save_store_data(data['results'])
 
                                 total_stats['regions_crawled'] += 1
                                 total_stats['total_stores'] += stores_count
