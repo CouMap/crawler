@@ -616,9 +616,13 @@ class Crawler(BaseCrawler):
 
     def crawl_region(self, province_name: str = None, district_name: str = None,
                      dong_name: str = None) -> Dict[str, Any]:
-        """특정 지역 크롤링"""
+        """복구 기능이 있는 지역 크롤링"""
         logger.info(f"지역 크롤링 시작: {province_name or '전체'} > {district_name or '전체'} > {dong_name or '전체'}")
+        return self.execute_with_recovery(self._crawl_region_impl, province_name, district_name, dong_name)
 
+    def _crawl_region_impl(self, province_name: str = None, district_name: str = None,
+                           dong_name: str = None) -> Dict[str, Any]:
+        """실제 지역 크롤링 구현"""
         total_stats = {
             'regions_crawled': 0,
             'total_stores': 0,
@@ -628,10 +632,6 @@ class Crawler(BaseCrawler):
         }
 
         try:
-            # 웹사이트 접근
-            if not self.access_website():
-                return total_stats
-
             # 지역 목록 가져오기
             provinces = self.get_all_regions_from_site()
 
@@ -660,11 +660,11 @@ class Crawler(BaseCrawler):
                         logger.info(f"읍/면/동 크롤링: {dong['name']}")
 
                         # 읍/면/동 선택 및 검색
-                        selected_dong = self.select_dong_and_search(dong['index'])
+                        selected_dong = self.select_dong_and_search_with_recovery(dong['index'])
 
                         if selected_dong:
                             # 데이터 추출
-                            data = self.extract_data()
+                            data = self.extract_data_with_recovery()
 
                             if data and data.get('results'):
                                 stores_count = len(data['results'])
@@ -687,25 +687,37 @@ class Crawler(BaseCrawler):
 
                         # 다음 검색을 위해 팝업 재오픈
                         if dong_idx < len(dongs) - 1:
-                            self.reopen_area_selection()
+                            self.reopen_area_selection_with_recovery()
                             # 현재 시/도, 시/군/구 재선택
                             self.get_districts_for_province(province['value'])
                             self.get_dongs_for_district(district['value'])
 
                     # 다음 시/군/구를 위한 재오픈
                     if districts.index(district) < len(districts) - 1:
-                        self.reopen_area_selection()
+                        self.reopen_area_selection_with_recovery()
                         self.get_districts_for_province(province['value'])
 
                 # 다음 시/도를 위한 재오픈
                 if provinces.index(province) < len(provinces) - 1:
-                    self.reopen_area_selection()
+                    self.reopen_area_selection_with_recovery()
 
             return total_stats
 
         except Exception as e:
             logger.error(f"지역 크롤링 오류: {e}")
             return total_stats
+
+    def select_dong_and_search_with_recovery(self, dong_index: int) -> Optional[str]:
+        """복구 기능이 있는 읍/면/동 선택 및 검색"""
+        return self.execute_with_recovery(self.select_dong_and_search, dong_index)
+
+    def extract_data_with_recovery(self) -> Dict[str, Any]:
+        """복구 기능이 있는 데이터 추출"""
+        return self.execute_with_recovery(self.extract_data)
+
+    def reopen_area_selection_with_recovery(self):
+        """복구 기능이 있는 지역선택 팝업 재열기"""
+        return self.execute_with_recovery(self.reopen_area_selection)
 
     def extract_region_from_address(self, address):
         """주소에서 지역 정보 추출 - 간소화된 버전"""

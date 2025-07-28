@@ -134,6 +134,71 @@ class BaseCrawler(ABC):
         """주소에서 지역 정보 추출 (각 크롤러에서 구현)"""
         pass
 
+    def check_browser_connection(self) -> bool:
+        """브라우저 연결 상태 확인"""
+        try:
+            self.driver.current_url
+            return True
+        except Exception as e:
+            logger.warning(f"브라우저 연결 끊김 감지: {e}")
+            return False
+
+    def handle_session_lost(self) -> bool:
+        """세션 끊김 처리 및 복구"""
+        logger.warning("브라우저 세션 끊김 감지, 재연결 시도...")
+        try:
+            # 기존 드라이버 정리
+            self.cleanup()
+
+            # 새 드라이버 설정
+            self.setup_driver()
+
+            # 웹사이트 재접근 (서브클래스에서 구현)
+            if hasattr(self, 'access_website'):
+                return self.access_website()
+
+            logger.info("브라우저 세션 복구 성공")
+            return True
+
+        except Exception as e:
+            logger.error(f"세션 복구 실패: {e}")
+            return False
+
+    def execute_with_recovery(self, func, *args, **kwargs):
+        """복구 기능이 있는 함수 실행"""
+        max_retries = 3
+
+        for attempt in range(max_retries):
+            try:
+                # 연결 상태 확인
+                if not self.check_browser_connection():
+                    raise Exception("Browser connection lost")
+
+                # 함수 실행
+                return func(*args, **kwargs)
+
+            except Exception as e:
+                error_msg = str(e).lower()
+
+                if any(keyword in error_msg for keyword in ['invalid session', 'connection lost', 'disconnected']):
+                    logger.warning(f"세션 오류 감지 ({attempt + 1}/{max_retries}): {e}")
+
+                    if attempt < max_retries - 1:  # 마지막 시도가 아니면
+                        if self.handle_session_lost():
+                            logger.info(f"복구 성공, 재시도 {attempt + 1}")
+                            continue
+                        else:
+                            logger.error("복구 실패, 다음 시도...")
+                            continue
+                    else:
+                        logger.error("최대 재시도 횟수 초과")
+                        raise
+                else:
+                    # 세션 오류가 아닌 다른 오류는 바로 발생
+                    raise
+
+        raise Exception("세션 복구 최대 시도 횟수 초과")
+
     def save_store_data(self, stores_data: List[Dict[str, Any]]) -> Dict[str, int]:
         logger.info(f"가맹점 데이터 저장 시작: {len(stores_data)}개")
 
@@ -177,33 +242,8 @@ class BaseCrawler(ABC):
                 # 지도 검색
                 search_result = self.map_api.search_location(original_name, category_name, address)
 
-                latitude = None
-                longitude = None
-                final_store_name = original_name
-                final_store_addr = address
-
-                if search_result['found']:
-                    coords = search_result['coordinates']
-                    latitude = coords['latitude']
-                    longitude = coords['longitude']
-
-                    # API에서 받은 이름, 주소 사용
-                    if search_result.get('api_store_name'):
-                        final_store_name = search_result['api_store_name']
-                        logger.debug(f"API 이름 사용: '{original_name}' -> '{final_store_name}'")
-
-                    if search_result.get('api_store_addr'):
-                        final_store_addr = search_result['api_store_addr']
-                        logger.debug(f"API 주소 사용: '{address}' -> '{final_store_addr}'")
-
-                    api_used = search_result['api_used']
-                    if api_used == 'naver':
-                        stats['naver_success'] += 1
-                    elif api_used == 'kakao':
-                        stats['kakao_success'] += 1
-
-                    logger.debug(f"지도 검색 성공: {api_used.upper()}")
-                else:
+                # 지도 검색 실패시 DB에 저장하지 않고 실패 데이터에만 추가
+                if not search_result['found']:
                     logger.warning(f"지도 검색 실패: {original_name}")
                     stats['api_failed'] += 1
 
@@ -222,6 +262,26 @@ class BaseCrawler(ABC):
                         'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
                     })
 
+                    # DB에 저장하지 않고 다음 가맹점으로
+                    continue
+
+                # 지도 검색 성공시에만 DB 저장 진행
+                coords = search_result['coordinates']
+                latitude = coords['latitude']
+                longitude = coords['longitude']
+
+                # API에서 받은 이름, 주소 사용
+                final_store_name = search_result.get('api_store_name', original_name)
+                final_store_addr = search_result.get('api_store_addr', address)
+
+                api_used = search_result['api_used']
+                if api_used == 'naver':
+                    stats['naver_success'] += 1
+                elif api_used == 'kakao':
+                    stats['kakao_success'] += 1
+
+                logger.debug(f"지도 검색 성공: {api_used.upper()}")
+
                 # 중복 체크
                 if self.db.store_exists(final_store_name, final_store_addr, region.id):
                     logger.debug(f"이미 존재하는 가맹점: {final_store_name}")
@@ -235,7 +295,7 @@ class BaseCrawler(ABC):
                     name=category_name
                 )
 
-                # 가맹점 저장
+                # 가맹점 저장 (좌표 있는 경우에만)
                 self.db.create_store(
                     name=final_store_name,
                     category=category,
@@ -264,7 +324,7 @@ class BaseCrawler(ABC):
         # 통계 업데이트
         self.crawling_stats.update(stats)
 
-        logger.info(f"가맹점 저장 완료 - 성공: {stats['saved']}, 신규 지역: {stats['new_regions']}")
+        logger.info(f"가맹점 저장 완료 - 성공: {stats['saved']}, 실패: {stats['api_failed']}")
         return stats
 
     def wait_with_delay(self, delay: float = None):
