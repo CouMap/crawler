@@ -832,6 +832,280 @@ class Crawler(BaseCrawler):
             if original_recovery_state:
                 self.enable_recovery()
 
+    def get_total_data_count(self) -> int:
+        """전체 데이터 개수 확인"""
+        try:
+            script = """
+            // 전체 데이터 개수 확인
+            var totalCount = 0;
+
+            // 소비쿠폰 데이터 개수
+            if (typeof resultMinsJson !== 'undefined' && Array.isArray(resultMinsJson)) {
+                totalCount = resultMinsJson.length;
+            }
+
+            console.log('전체 데이터 개수:', totalCount);
+            return totalCount;
+            """
+
+            result = self.driver.execute_script(script)
+            logger.debug(f"전체 데이터 개수: {result}")
+            return result if isinstance(result, int) else 0
+
+        except Exception as e:
+            logger.error(f"데이터 개수 확인 실패: {e}")
+            return 0
+
+    def extract_batch_data(self, start_idx: int, end_idx: int) -> List[Dict[str, Any]]:
+        """특정 범위의 데이터 배치 추출"""
+        try:
+            script = f"""
+            var batchResults = [];
+
+            console.log('배치 추출 시작: {start_idx} ~ {end_idx - 1}');
+
+            // 소비쿠폰 데이터에서 지정된 범위만 추출
+            if (typeof resultMinsJson !== 'undefined' && Array.isArray(resultMinsJson)) {{
+                var endIndex = Math.min({end_idx}, resultMinsJson.length);
+
+                for (var i = {start_idx}; i < endIndex; i++) {{
+                    var item = resultMinsJson[i];
+                    if (item && item.content) {{
+                        var name = item.content.title || '';
+                        var address = item.content.address || '';
+
+                        // 유효한 데이터만 추가
+                        if (name && address) {{
+                            batchResults.push({{
+                                type: '소비쿠폰',
+                                name: name,
+                                address: address,
+                                category: item.content.category || '',
+                                phone: item.content.tel || '',
+                                distance: item.content.distance || ''
+                            }});
+                        }}
+                    }}
+                }}
+            }}
+
+            console.log('배치 추출 완료:', batchResults.length + '개');
+            return batchResults;
+            """
+
+            result = self.driver.execute_script(script)
+            return result if isinstance(result, list) else []
+
+        except Exception as e:
+            logger.error(f"배치 데이터 추출 실패 ({start_idx}~{end_idx}): {e}")
+            return []
+
+    def extract_data_with_pagination(self, batch_size=200) -> Dict[str, Any]:
+        """페이지네이션 방식으로 대용량 데이터 추출"""
+        try:
+            # 1단계: 전체 데이터 개수 확인
+            total_count = self.get_total_data_count()
+            if total_count == 0:
+                logger.info("추출할 데이터가 없습니다")
+                return {'total_display': '0', 'results': [], 'extracted_count': 0}
+
+            logger.info(f"총 {total_count}개 데이터 발견, {batch_size}개씩 배치 처리 시작")
+
+            all_results = []
+            total_batches = (total_count + batch_size - 1) // batch_size  # 올림 계산
+
+            # 2단계: 배치별로 데이터 추출
+            for batch_num in range(total_batches):
+                start_idx = batch_num * batch_size
+                end_idx = min(start_idx + batch_size, total_count)
+
+                logger.info(f"배치 {batch_num + 1}/{total_batches}: {start_idx + 1}~{end_idx}번째 데이터 추출 중...")
+
+                batch_data = self.extract_batch_data(start_idx, end_idx)
+                if batch_data:
+                    all_results.extend(batch_data)
+                    logger.info(f"배치 {batch_num + 1} 완료: {len(batch_data)}개 추출")
+
+                    # 배치 간 잠시 대기 (메모리 및 성능 고려)
+                    time.sleep(1)
+                else:
+                    logger.warning(f"배치 {batch_num + 1} 추출 실패")
+
+            logger.info(f"전체 페이지네이션 완료: {len(all_results)}개 데이터 추출")
+
+            return {
+                'total_display': str(total_count),
+                'results': all_results,
+                'extracted_count': len(all_results),
+                'batches_processed': total_batches
+            }
+
+        except Exception as e:
+            logger.error(f"페이지네이션 데이터 추출 실패: {e}")
+            return None
+
+    def crawl_single_region_smart(self, province_name: str = "서울", district_name: str = "강남구",
+                                  dong_name: str = "일원본동", auto_pagination: bool = True) -> Dict[str, Any]:
+        """스마트 단일 지역 크롤링 (자동 페이지네이션 포함)"""
+        logger.info(f"스마트 단일 지역 크롤링: {province_name} {district_name} {dong_name}")
+
+        total_stats = {
+            'regions_crawled': 0,
+            'total_stores': 0,
+            'total_saved': 0,
+            'api_success': 0,
+            'api_failed': 0
+        }
+
+        try:
+            # 사이트 접근 및 설정
+            if not self.access_website():
+                logger.error("사이트 접근 실패")
+                return total_stats
+
+            # 지역 목록 가져오기 및 대상 지역 찾기
+            provinces = self.get_all_regions_from_site()
+            target_province = None
+            for province in provinces:
+                if province_name in province['name']:
+                    target_province = province
+                    break
+
+            if not target_province:
+                logger.error(f"시/도를 찾을 수 없습니다: {province_name}")
+                return total_stats
+
+            logger.info(f"대상 시/도: {target_province['name']}")
+
+            districts = self.get_districts_for_province(target_province['value'])
+            target_district = None
+            for district in districts:
+                if district_name in district['name']:
+                    target_district = district
+                    break
+
+            if not target_district:
+                logger.error(f"시/군/구를 찾을 수 없습니다: {district_name}")
+                return total_stats
+
+            logger.info(f"대상 시/군/구: {target_district['name']}")
+
+            dongs = self.get_dongs_for_district(target_district['value'])
+            target_dong = None
+            for dong in dongs:
+                if dong_name in dong['name']:
+                    target_dong = dong
+                    break
+
+            if not target_dong:
+                target_dong = dongs[0] if dongs else None
+                logger.warning(f"지정된 읍/면/동을 찾을 수 없어 첫 번째 동 사용: {target_dong['name'] if target_dong else 'None'}")
+
+            if not target_dong:
+                logger.error("사용할 읍/면/동이 없습니다")
+                return total_stats
+
+            logger.info(f"대상 읍/면/동: {target_dong['name']}")
+
+            # 읍/면/동 선택 및 검색
+            selected_dong = self.select_dong_and_search(target_dong['index'])
+            if not selected_dong:
+                logger.error("읍/면/동 선택 실패")
+                return total_stats
+
+            # 데이터 크기 미리 확인
+            total_count = self.get_total_data_count()
+            logger.info(f"대상 지역 데이터 개수: {total_count}개")
+
+            if total_count == 0:
+                logger.info("추출할 데이터가 없습니다")
+                return {
+                    'regions_crawled': 1,
+                    'total_stores': 0,
+                    'total_saved': 0,
+                    'api_success': 0,
+                    'api_failed': 0
+                }
+
+            # 대용량 데이터 자동 감지 및 페이지네이션 적용
+            if auto_pagination and total_count > 500:
+                logger.info(f"대용량 데이터 감지 ({total_count}개), 페이지네이션 모드로 전환")
+
+                # 페이지네이션으로 데이터 추출
+                data = self.extract_data_with_pagination(batch_size=200)
+
+                if data and data.get('results'):
+                    # 배치별 DB 저장
+                    stores_data = data['results']
+                    total_stores = len(stores_data)
+                    logger.info(f"총 {total_stores}개 가맹점 데이터 추출 완료")
+
+                    # 50개씩 나누어 저장 (메모리 절약)
+                    total_saved = 0
+                    total_api_success = 0
+                    total_api_failed = 0
+
+                    save_batch_size = 50
+                    total_save_batches = (total_stores + save_batch_size - 1) // save_batch_size
+
+                    for i in range(0, total_stores, save_batch_size):
+                        batch = stores_data[i:i + save_batch_size]
+                        batch_num = (i // save_batch_size) + 1
+
+                        logger.info(f"DB 저장 배치 {batch_num}/{total_save_batches}: {len(batch)}개 처리 중...")
+
+                        save_stats = self.save_store_data(batch)
+                        total_saved += save_stats['saved']
+                        total_api_success += save_stats['naver_success'] + save_stats['kakao_success']
+                        total_api_failed += save_stats['api_failed']
+
+                        # 진행률 출력
+                        progress = (i + len(batch)) / total_stores * 100
+                        logger.info(f"DB 저장 진행률: {progress:.1f}% (누적 저장: {total_saved}개)")
+
+                        # 메모리 정리
+                        import gc
+                        gc.collect()
+
+                        # 잠시 대기
+                        time.sleep(0.5)
+
+                    total_stats.update({
+                        'regions_crawled': 1,
+                        'total_stores': total_stores,
+                        'total_saved': total_saved,
+                        'api_success': total_api_success,
+                        'api_failed': total_api_failed
+                    })
+
+                    logger.info(f"페이지네이션 처리 완료: {total_saved}개 저장")
+                else:
+                    logger.warning("페이지네이션 데이터 추출 실패")
+            else:
+                # 일반 모드로 처리
+                logger.info(f"일반 크기 데이터 ({total_count}개), 기본 모드로 처리")
+                data = self.extract_data()
+
+                if data and data.get('results'):
+                    save_stats = self.save_store_data(data['results'])
+                    total_stats.update({
+                        'regions_crawled': 1,
+                        'total_stores': len(data['results']),
+                        'total_saved': save_stats['saved'],
+                        'api_success': save_stats['naver_success'] + save_stats['kakao_success'],
+                        'api_failed': save_stats['api_failed']
+                    })
+
+                    logger.info(f"기본 모드 처리 완료: {save_stats['saved']}개 저장")
+                else:
+                    logger.warning("기본 모드 데이터 추출 실패")
+
+            return total_stats
+
+        except Exception as e:
+            logger.error(f"스마트 단일 지역 크롤링 오류: {e}")
+            return total_stats
+
     def crawl_single_region_with_recovery(self, province_name: str = None, district_name: str = None,
                                           dong_name: str = None) -> Dict[str, Any]:
         """복구 기능이 있는 단일 지역 크롤링"""
@@ -1018,7 +1292,7 @@ class Crawler(BaseCrawler):
 
     def crawl_single_region(self, province_name: str, district_name: str = None,
                             dong_name: str = None) -> Dict[str, Any]:
-        """단일 지역 크롤링 - 모드에 따라 복구 기능 선택"""
+        """단일 지역 크롤링 - 자동 페이지네이션 지원"""
 
         # test 모드이거나 특정 조건인 경우 단순버전 사용
         if (province_name == "서울" and district_name == "강남구" and
@@ -1026,8 +1300,8 @@ class Crawler(BaseCrawler):
             logger.info("테스트 모드: 단순 크롤링 방식 사용")
             return self.crawl_single_region_simple(province_name, district_name, dong_name)
         else:
-            logger.info("일반 모드: 복구 기능 포함 크롤링 사용")
-            return self.crawl_single_region_with_recovery(province_name, district_name, dong_name)
+            logger.info("일반 모드: 스마트 크롤링 사용 (자동 페이지네이션 포함)")
+            return self.crawl_single_region_smart(province_name, district_name, dong_name)
 
     def set_recovery_mode(self, enabled: bool):
         """복구 모드 설정"""
