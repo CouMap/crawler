@@ -19,7 +19,7 @@ from ..utils import CSVHandler, AddressParser
 
 
 class BaseCrawler(ABC):
-    """크롤러 기본 클래스"""
+    """크롤러 기본 클래스 - 개선된 세션 복구 로직"""
 
     def __init__(self):
         self.driver: Optional[webdriver.Chrome] = None
@@ -27,6 +27,11 @@ class BaseCrawler(ABC):
         self.map_api = IntegratedMapAPI()
         self.address_parser = AddressParser()
         self.csv_handler = CSVHandler()
+
+        # 세션 복구 설정
+        self.recovery_enabled = True
+        self.max_recovery_attempts = 2
+        self.recovery_count = 0
 
         # 크롤링 상태
         self.failed_stores: List[Dict[str, Any]] = []
@@ -37,7 +42,16 @@ class BaseCrawler(ABC):
             'kakao_success': 0,
             'api_failed': 0,
             'duplicates': 0,
-            'errors': 0
+            'errors': 0,
+            'recovery_attempts': 0
+        }
+
+        # 현재 크롤링 상태 저장
+        self.current_state = {
+            'province': None,
+            'district': None,
+            'dong': None,
+            'step': 'init'
         }
 
         # 로깅 설정
@@ -77,7 +91,7 @@ class BaseCrawler(ABC):
             cache_dir = os.path.expanduser("~/.wdm")
             if os.path.exists(cache_dir):
                 shutil.rmtree(cache_dir)
-                logger.info("ChromeDriver 캐시 삭제 완료")
+                logger.debug("ChromeDriver 캐시 삭제 완료")
         except Exception as e:
             logger.warning(f"캐시 삭제 실패: {e}")
 
@@ -134,70 +148,155 @@ class BaseCrawler(ABC):
         """주소에서 지역 정보 추출 (각 크롤러에서 구현)"""
         pass
 
-    def check_browser_connection(self) -> bool:
-        """브라우저 연결 상태 확인"""
+    def save_crawling_state(self, province=None, district=None, dong=None, step='unknown'):
+        """현재 크롤링 상태 저장"""
+        self.current_state = {
+            'province': province,
+            'district': district,
+            'dong': dong,
+            'step': step,
+            'timestamp': time.time()
+        }
+        logger.debug(f"크롤링 상태 저장: {self.current_state}")
+
+    def is_session_error(self, error: Exception) -> bool:
+        """세션 관련 오류인지 판단"""
+        error_msg = str(error).lower()
+        session_keywords = [
+            'invalid session',
+            'session not created',
+            'chrome not reachable',
+            'connection refused',
+            'no such window',
+            'disconnected',
+            'target window already closed',
+            'chrome has crashed',
+            'session deleted because of page crash'
+        ]
+        return any(keyword in error_msg for keyword in session_keywords)
+
+    def check_browser_health(self) -> bool:
+        """브라우저 상태 확인"""
         try:
-            self.driver.current_url
+            # 여러 방법으로 브라우저 상태 확인
+            url = self.driver.current_url
+            title = self.driver.title
+
+            # JavaScript 실행 테스트
+            result = self.driver.execute_script("return document.readyState;")
+
+            logger.debug(f"브라우저 상태 확인 성공 - URL: {url[:50]}..., 상태: {result}")
             return True
+
         except Exception as e:
-            logger.warning(f"브라우저 연결 끊김 감지: {e}")
+            logger.warning(f"브라우저 상태 확인 실패: {e}")
             return False
 
-    def handle_session_lost(self) -> bool:
-        """세션 끊김 처리 및 복구"""
-        logger.warning("브라우저 세션 끊김 감지, 재연결 시도...")
+    def quick_recovery(self) -> bool:
+        """빠른 세션 복구"""
         try:
-            # 기존 드라이버 정리
-            self.cleanup()
+            logger.info("빠른 세션 복구 시도...")
+            self.crawling_stats['recovery_attempts'] += 1
+
+            # 기존 드라이버 안전하게 정리
+            if self.driver:
+                try:
+                    self.driver.quit()
+                    logger.debug("기존 드라이버 종료 완료")
+                except:
+                    logger.debug("기존 드라이버 종료 중 오류 (무시)")
+
+            # 잠시 대기
+            time.sleep(2)
 
             # 새 드라이버 설정
             self.setup_driver()
+            logger.debug("새 드라이버 설정 완료")
 
-            # 웹사이트 재접근 (서브클래스에서 구현)
-            if hasattr(self, 'access_website'):
-                return self.access_website()
+            # 기본 사이트 접근
+            self.driver.get(crawler_config.KB_CARD_URL)
+            time.sleep(3)
 
-            logger.info("브라우저 세션 복구 성공")
-            return True
+            # 브라우저 상태 확인
+            if self.check_browser_health():
+                logger.info("빠른 세션 복구 성공")
+                return True
+            else:
+                logger.warning("세션은 복구되었지만 브라우저 상태가 불안정")
+                return False
 
         except Exception as e:
-            logger.error(f"세션 복구 실패: {e}")
+            logger.error(f"빠른 세션 복구 실패: {e}")
             return False
 
-    def execute_with_recovery(self, func, *args, **kwargs):
-        """복구 기능이 있는 함수 실행"""
-        max_retries = 3
+    def execute_with_recovery(self, func, *args, description="", **kwargs):
+        """개선된 복구 기능이 있는 함수 실행"""
+        if not self.recovery_enabled:
+            logger.debug(f"복구 기능 비활성화 상태에서 실행: {description}")
+            return func(*args, **kwargs)
 
-        for attempt in range(max_retries):
+        last_error = None
+
+        for attempt in range(self.max_recovery_attempts):
             try:
-                # 연결 상태 확인
-                if not self.check_browser_connection():
-                    raise Exception("Browser connection lost")
+                if attempt > 0:
+                    logger.info(f"재시도 {attempt}/{self.max_recovery_attempts - 1}: {description}")
+                else:
+                    logger.debug(f"실행 중: {description}")
+
+                # 브라우저 상태 사전 확인 (첫 시도가 아닌 경우)
+                if attempt > 0 and not self.check_browser_health():
+                    raise Exception("Browser health check failed")
 
                 # 함수 실행
-                return func(*args, **kwargs)
+                result = func(*args, **kwargs)
+
+                if attempt > 0:
+                    logger.info(f"재시도 성공: {description}")
+
+                return result
 
             except Exception as e:
-                error_msg = str(e).lower()
+                last_error = e
+                logger.warning(f"실행 실패 ({attempt + 1}/{self.max_recovery_attempts}): {description} - {e}")
 
-                if any(keyword in error_msg for keyword in ['invalid session', 'connection lost', 'disconnected']):
-                    logger.warning(f"세션 오류 감지 ({attempt + 1}/{max_retries}): {e}")
+                # 마지막 시도인 경우 복구하지 않고 바로 에러 발생
+                if attempt >= self.max_recovery_attempts - 1:
+                    break
 
-                    if attempt < max_retries - 1:  # 마지막 시도가 아니면
-                        if self.handle_session_lost():
-                            logger.info(f"복구 성공, 재시도 {attempt + 1}")
-                            continue
-                        else:
-                            logger.error("복구 실패, 다음 시도...")
-                            continue
+                # 세션 관련 오류인지 확인
+                if self.is_session_error(e):
+                    logger.warning(f"세션 오류 감지, 복구 시도: {e}")
+
+                    if self.quick_recovery():
+                        logger.info("세션 복구 성공, 다시 시도")
+                        continue
                     else:
-                        logger.error("최대 재시도 횟수 초과")
-                        raise
+                        logger.error("세션 복구 실패")
+                        break
                 else:
-                    # 세션 오류가 아닌 다른 오류는 바로 발생
-                    raise
+                    # 세션 오류가 아닌 경우 바로 종료
+                    logger.debug(f"세션 오류가 아님, 재시도하지 않음: {e}")
+                    break
 
-        raise Exception("세션 복구 최대 시도 횟수 초과")
+        # 모든 시도 실패
+        logger.error(f"모든 시도 실패: {description}")
+        raise last_error
+
+    def execute_simple(self, func, *args, description="", **kwargs):
+        """단순 실행 (복구 없음)"""
+        logger.debug(f"단순 실행: {description}")
+        return func(*args, **kwargs)
+
+    def disable_recovery(self):
+        """복구 기능 비활성화"""
+        self.recovery_enabled = False
+        logger.info("세션 복구 기능 비활성화")
+
+    def enable_recovery(self):
+        """복구 기능 활성화"""
+        self.recovery_enabled = True
+        logger.info("세션 복구 기능 활성화")
 
     def save_store_data(self, stores_data: List[Dict[str, Any]]) -> Dict[str, int]:
         logger.info(f"가맹점 데이터 저장 시작: {len(stores_data)}개")
