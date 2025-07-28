@@ -832,10 +832,13 @@ class Crawler(BaseCrawler):
             if original_recovery_state:
                 self.enable_recovery()
 
-    def crawl_single_region_with_recovery(self, province_name: str, district_name: str = None,
+    def crawl_single_region_with_recovery(self, province_name: str = None, district_name: str = None,
                                           dong_name: str = None) -> Dict[str, Any]:
         """복구 기능이 있는 단일 지역 크롤링"""
-        logger.info(f"단일 지역 크롤링 (복구기능): {province_name} {district_name} {dong_name}")
+        if province_name:
+            logger.info(f"단일 지역 크롤링 (복구기능): {province_name} {district_name} {dong_name}")
+        else:
+            logger.info("전국 크롤링 (복구기능)")
 
         # 복구 기능 활성화 확인
         if not self.recovery_enabled:
@@ -921,20 +924,36 @@ class Crawler(BaseCrawler):
                         if dong_name:
                             return total_stats
 
+                        # 다음 동을 위한 팝업 재오픈 (마지막 동이 아닌 경우)
+                        if dongs.index(dong) < len(dongs) - 1:
+                            self.reopen_area_selection()
+                            # 현재 시/도, 시/군/구 재선택
+                            self.get_districts_for_province(province['value'])
+                            self.get_dongs_for_district(district['value'])
+
                     # 지정된 시/군/구만 크롤링하는 경우 여기서 종료
                     if district_name:
                         return total_stats
 
+                    # 다음 시/군/구를 위한 팝업 재오픈 (마지막 시/군/구가 아닌 경우)
+                    if districts.index(district) < len(districts) - 1:
+                        self.reopen_area_selection()
+                        self.get_districts_for_province(province['value'])
+
                 # 지정된 시/도만 크롤링하는 경우 여기서 종료
                 if province_name:
                     return total_stats
+
+                # 다음 시/도를 위한 팝업 재오픈 (마지막 시/도가 아닌 경우)
+                if provinces.index(province) < len(provinces) - 1:
+                    self.reopen_area_selection()
 
             return total_stats
 
         try:
             return self.execute_with_recovery(
                 _crawl_with_recovery,
-                description=f"지역 크롤링 ({province_name} {district_name} {dong_name})"
+                description=f"지역 크롤링 ({province_name or '전국'} {district_name or ''} {dong_name or ''})"
             )
         except Exception as e:
             logger.error(f"복구 기능 지역 크롤링 실패: {e}")
@@ -995,7 +1014,7 @@ class Crawler(BaseCrawler):
     def crawl_all_regions(self) -> Dict[str, Any]:
         """전국 모든 지역 크롤링"""
         logger.info("전국 크롤링 시작")
-        return self.crawl_single_region_with_recovery()
+        return self.crawl_single_region_with_recovery(province_name=None, district_name=None, dong_name=None)
 
     def crawl_single_region(self, province_name: str, district_name: str = None,
                             dong_name: str = None) -> Dict[str, Any]:
