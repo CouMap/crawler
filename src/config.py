@@ -41,8 +41,12 @@ class APIConfig:
 # 크롤링 설정
 class CrawlerConfig:
     KB_CARD_URL = 'https://m.kbcard.com/BON/DVIEW/MBAM0005'
+
+    # 디버깅을 위해 기본값을 False로 변경
     HEADLESS = os.getenv('HEADLESS', 'false').lower() == 'true'
-    CRAWL_DELAY = float(os.getenv('CRAWL_DELAY', '5.0'))
+
+    # 대기시간을 더 길게 설정
+    CRAWL_DELAY = float(os.getenv('CRAWL_DELAY', '8.0'))
     API_DELAY = float(os.getenv('API_DELAY', '0.2'))
 
     # 사용자 에이전트 설정
@@ -50,14 +54,18 @@ class CrawlerConfig:
                            'Mozilla/5.0 (iPhone; CPU iPhone OS 14_7_1 like Mac OS X) AppleWebKit/605.1.15'
                            )
 
-    # 크롬 드라이버 옵션
+    # 크롬 드라이버 옵션 - 더 안정적으로 설정
     CHROME_OPTIONS = [
         '--no-sandbox',
         '--disable-dev-shm-usage',
         '--disable-gpu',
         '--window-size=1200,800',
         '--disable-web-security',
-        '--disable-features=VizDisplayCompositor'
+        '--disable-features=VizDisplayCompositor',
+        '--disable-blink-features=AutomationControlled',  # 자동화 감지 방지
+        '--disable-extensions',
+        '--no-first-run',
+        '--disable-default-apps'
     ]
 
 
@@ -73,24 +81,26 @@ class LoggingConfig:
         return LOGS_DIR / f"{name}_{os.getenv('GITHUB_RUN_ID', 'local')}.log"
 
 
-# 설정 검증
+# 설정 검증 - 개발 환경에서는 완화
 def validate_config():
     """필수 설정 검증"""
     errors = []
 
-    db_config = DatabaseConfig()
-    if not db_config.USER or not db_config.PASSWORD:
-        errors.append("DB_USER와 DB_PASSWORD가 필요합니다.")
+    # GitHub Actions 환경이 아닌 경우 API 키 검증 완화
+    if os.getenv('GITHUB_ACTIONS') == 'true':
+        db_config = DatabaseConfig()
+        if not db_config.USER or not db_config.PASSWORD:
+            errors.append("DB_USER와 DB_PASSWORD가 필요합니다.")
 
-    api_config = APIConfig()
-    if not api_config.NAVER_CLIENT_ID or not api_config.NAVER_CLIENT_SECRET:
-        errors.append("NAVER_CLIENT_ID와 NAVER_CLIENT_SECRET이 필요합니다.")
+        api_config = APIConfig()
+        if not api_config.NAVER_CLIENT_ID or not api_config.NAVER_CLIENT_SECRET:
+            errors.append("NAVER_CLIENT_ID와 NAVER_CLIENT_SECRET이 필요합니다.")
 
-    if not api_config.KAKAO_API_KEY:
-        errors.append("KAKAO_API_KEY가 필요합니다.")
+        if not api_config.KAKAO_API_KEY:
+            errors.append("KAKAO_API_KEY가 필요합니다.")
 
-    if errors:
-        raise ValueError("\n".join(errors))
+        if errors:
+            raise ValueError("\n".join(errors))
 
 
 # 전역 설정 인스턴스
@@ -99,6 +109,5 @@ api_config = APIConfig()
 crawler_config = CrawlerConfig()
 logging_config = LoggingConfig()
 
-# GitHub Actions 환경에서만 설정 검증
-if os.getenv('GITHUB_ACTIONS') == 'true':
-    validate_config()
+# 설정 검증
+validate_config()
