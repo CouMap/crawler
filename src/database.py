@@ -166,7 +166,12 @@ class Database:
     def get_statistics(self) -> Dict[str, Any]:
         """통계 조회"""
         with self.get_session() as session:
+            from sqlalchemy import func
+
+            # 총 가맹점 수
             total = session.query(Store).count()
+
+            # 좌표 보유 가맹점 수
             with_coords = session.query(Store).filter(
                 and_(
                     Store.latitude.isnot(None),
@@ -174,22 +179,28 @@ class Database:
                 )
             ).count()
 
-            by_category_str = session.query(
+            # 문자열 카테고리별 통계
+            by_category_str_query = session.query(
                 Store.category,
-                session.query(Store).filter(Store.category == Store.category).count()
-            ).group_by(Store.category).all() if total > 0 else []
+                func.count(Store.id)
+            ).group_by(Store.category).all()
 
-            by_category_obj = session.query(
+            by_category_str = {category: count for category, count in by_category_str_query}
+
+            # 객체 카테고리별 통계
+            by_category_obj_query = session.query(
                 Category.name,
-                session.query(Store).filter(Store.category_id == Category.id).count()
-            ).join(Store).group_by(Category.name).all() if total > 0 else []
+                func.count(Store.id)
+            ).join(Store, Store.category_id == Category.id).group_by(Category.name).all()
+
+            by_category_obj = {category: count for category, count in by_category_obj_query}
 
             return {
                 'total_stores': total,
                 'stores_with_coordinates': with_coords,
                 'success_rate': round((with_coords / total * 100) if total > 0 else 0, 2),
-                'stores_by_category_str': dict(by_category_str),
-                'stores_by_category_obj': dict(by_category_obj)
+                'stores_by_category_str': by_category_str,
+                'stores_by_category_obj': by_category_obj
             }
 
     def close(self):
