@@ -47,7 +47,7 @@ class CrawlerConfig:
 
     # 대기시간을 더 길게 설정
     CRAWL_DELAY = float(os.getenv('CRAWL_DELAY', '8.0'))
-    API_DELAY = float(os.getenv('API_DELAY', '0.2'))
+    API_DELAY = float(os.getenv('API_DELAY', '1.0'))
 
     # 사용자 에이전트 설정
     USER_AGENT = os.getenv('USER_AGENT',
