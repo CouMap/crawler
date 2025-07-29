@@ -145,7 +145,7 @@ class NaverSearchAPI(BaseMapAPI):
                 logger.warning(f"시/군/구 불일치: 크롤링={original_parsed.get('city')} vs API={api_parsed.get('city')}")
                 return False
 
-            # 읍/면/동 비교 - 지번주소 기준으로 완화
+            # 읍/면/동 비교
             original_town = original_parsed.get('town')
             api_town = api_parsed.get('town')
 
@@ -155,14 +155,14 @@ class NaverSearchAPI(BaseMapAPI):
                     logger.debug(f"읍/면/동 완전 일치: {original_town}")
                     return True
 
-                # 부분 일치 검사 (동산동 vs 동산1동 같은 경우)
+                # 부분 일치 검사
                 if self._is_similar_town(original_town, api_town):
                     logger.debug(f"읍/면/동 유사 일치: 크롤링={original_town} vs API={api_town}")
                     return True
 
-                # 지번주소 사용 시 읍/면/동 불일치 경고만 하고 통과
-                logger.info(f"읍/면/동 불일치하지만 지번주소 기준으로 허용: 크롤링={original_town} vs API={api_town}")
-                return True
+                # 완전히 다른 동인 경우 거부
+                logger.warning(f"읍/면/동 불일치로 거부: 크롤링={original_town} vs API={api_town}")
+                return False
 
             logger.debug(f"주소 검증 성공: {original_address} ↔ {api_address}")
             return True
@@ -175,18 +175,11 @@ class NaverSearchAPI(BaseMapAPI):
         """읍/면/동 유사성 검사"""
         import re
 
-        # 숫자 제거 후 비교 (동산동 vs 동산1동)
+        # 숫자 제거 후 비교
         clean1 = re.sub(r'\d+', '', town1)
         clean2 = re.sub(r'\d+', '', town2)
 
-        if clean1 == clean2:
-            return True
-
-        # 앞 2글자만 비교 (동산동 vs 동세로 - 이건 다름)
-        if len(clean1) >= 2 and len(clean2) >= 2:
-            return clean1[:2] == clean2[:2]
-
-        return False
+        return clean1 == clean2
 
     def search_store_location(self, store_name: str, category: str, address: str) -> Dict[str, Any]:
         """네이버 검색 API 기반 가맹점 위치 확인 - 지번주소 비교, 도로명주소 저장"""
