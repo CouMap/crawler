@@ -13,13 +13,6 @@ class IntegratedMapAPI:
         self.naver_api: Optional[NaverSearchAPI] = None
         self.kakao_api: Optional[KakaoMapAPI] = None
 
-        # 네이버 검색 API 초기화
-        try:
-            self.naver_api = NaverSearchAPI()
-            logger.info("네이버 검색 API 초기화 성공")
-        except Exception as e:
-            logger.warning(f"네이버 검색 API 초기화 실패: {e}")
-
         # 카카오 API 초기화
         try:
             self.kakao_api = KakaoMapAPI()
@@ -27,8 +20,15 @@ class IntegratedMapAPI:
         except Exception as e:
             logger.warning(f"카카오 지도 API 초기화 실패: {e}")
 
-        if not self.naver_api and not self.kakao_api:
-            raise ValueError("네이버와 카카오 지도 API 모두 초기화에 실패했습니다.")
+        # 네이버 검색 API 초기화
+        try:
+            self.naver_api = NaverSearchAPI()
+            logger.info("네이버 검색 API 초기화 성공")
+        except Exception as e:
+            logger.warning(f"네이버 검색 API 초기화 실패: {e}")
+
+        if not self.kakao_api and not self.naver_api:
+            raise ValueError("카카오와 네이버 지도 API 모두 초기화에 실패했습니다.")
 
     def clean_store_name(self, store_name: str) -> str:
         """가맹점명 정리 - (주), 주식회사, 영어명 등 제거"""
@@ -60,15 +60,33 @@ class IntegratedMapAPI:
         return cleaned_name
 
     def search_location(self, store_name: str, category: str, address: str) -> Dict[str, Any]:
-        """통합 지도 검색 - 네이버 우선, 실패시 카카오"""
+        """통합 지도 검색"""
         logger.debug(f"통합 지도 검색 시작: {store_name}")
 
         # 가맹점명 정리
         cleaned_store_name = self.clean_store_name(store_name)
 
-        # 1. 네이버 검색 API 우선 검색
+        # 1. 카카오 지도 우선 검색
+        if self.kakao_api:
+            logger.debug("카카오 지도 API 시도...")
+            kakao_result = self.kakao_api.search_store_location(cleaned_store_name, category, address)
+
+            if kakao_result['found']:
+                logger.info(f"카카오 지도 검색 성공: {store_name}")
+                # API에서 받은 이름과 주소 사용
+                if 'coordinates' in kakao_result and 'place_name' in kakao_result['coordinates']:
+                    kakao_result['api_store_name'] = kakao_result['coordinates']['place_name']
+                    kakao_result['api_store_addr'] = kakao_result['coordinates'].get('road_address_name', address)
+                else:
+                    kakao_result['api_store_name'] = store_name
+                    kakao_result['api_store_addr'] = address
+                return kakao_result
+            else:
+                logger.warning(f"카카오 지도 검색 실패: {store_name}")
+
+        # 2. 네이버 검색 API 백업 검색
         if self.naver_api:
-            logger.debug("네이버 검색 API 시도...")
+            logger.debug("네이버 검색 API 백업 검색 시도...")
             naver_result = self.naver_api.search_store_location(cleaned_store_name, category, address)
 
             if naver_result['found']:
@@ -83,32 +101,14 @@ class IntegratedMapAPI:
                     naver_result['api_store_addr'] = address
                 return naver_result
             else:
-                logger.warning(f"네이버 검색 API 실패: {store_name}")
-
-        # 2. 카카오 지도 백업 검색
-        if self.kakao_api:
-            logger.debug("카카오 지도 백업 검색 시도...")
-            kakao_result = self.kakao_api.search_store_location(cleaned_store_name, category, address)
-
-            if kakao_result['found']:
-                logger.info(f"카카오 지도 검색 성공: {store_name}")
-                # API에서 받은 이름과 주소 사용
-                if 'coordinates' in kakao_result and 'place_name' in kakao_result['coordinates']:
-                    kakao_result['api_store_name'] = kakao_result['coordinates']['place_name']
-                    kakao_result['api_store_addr'] = kakao_result['coordinates'].get('road_address_name', address)
-                else:
-                    kakao_result['api_store_name'] = store_name
-                    kakao_result['api_store_addr'] = address
-                return kakao_result
-            else:
-                logger.warning(f"카카오 지도 검색도 실패: {store_name}")
+                logger.warning(f"네이버 검색 API도 실패: {store_name}")
 
         # 3. 모든 검색 실패
         logger.error(f"모든 지도 API 검색 실패: {store_name}")
         return {
             'found': False,
             'search_type': 'all_failed',
-            'query': f"네이버+카카오 모두 실패: {cleaned_store_name}",
+            'query': f"카카오+네이버 모두 실패: {cleaned_store_name}",
             'coordinates': None,
             'api_used': 'none',
             'original_name': store_name,
@@ -119,6 +119,7 @@ class IntegratedMapAPI:
 
     def get_coordinates_by_address(self, address: str) -> Dict[str, Any]:
         """주소로 좌표 조회"""
+        # 1. 카카오 API 우선 시도
         if self.kakao_api:
             logger.debug("카카오 API로 주소 검색 시도...")
             result = self.kakao_api.get_coordinates_by_address(address)
@@ -128,7 +129,7 @@ class IntegratedMapAPI:
             else:
                 logger.warning(f"카카오 주소 검색 실패: {address}")
 
-        # 카카오 실패시 네이버 시도
+        # 2. 카카오 실패시 네이버 시도
         if self.naver_api:
             logger.debug("네이버 API로 주소 검색 시도...")
             result = self.naver_api.get_coordinates_by_address(address)
