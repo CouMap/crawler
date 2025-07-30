@@ -165,19 +165,3 @@ jobs:
         print(f'좌표 보유 가맹점: {stats[\"stores_with_coordinates\"]}')
         print(f'성공률: {stats[\"success_rate\"]}%')
         "
-
-  notification:
-    name: 알림 발송
-    runs-on: self-hosted
-    needs: [crawl]
-    if: always() && github.event_name == 'workflow_dispatch'
-
-    steps:
-    - name: 결과 알림
-      run: |
-        if [ "${{ needs.crawl.result }}" == "success" ]; then
-          echo "크롤링이 성공적으로 완료되었습니다."
-        else
-          echo "크롤링이 실패했습니다."
-          exit 1
-        fi
