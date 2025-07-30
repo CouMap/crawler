@@ -944,10 +944,19 @@ class Crawler(BaseCrawler):
             logger.error(f"페이지네이션 데이터 추출 실패: {e}")
             return None
 
-    def crawl_single_region_smart(self, province_name: str = "서울", district_name: str = "강남구",
-                                  dong_name: str = "일원본동", auto_pagination: bool = True) -> Dict[str, Any]:
-        """스마트 단일 지역 크롤링 (자동 페이지네이션 포함)"""
-        logger.info(f"스마트 단일 지역 크롤링: {province_name} {district_name} {dong_name}")
+    def crawl_single_region_smart(self, province_name: str = "서울", district_name: str = None,
+                                  dong_name: str = None, auto_pagination: bool = True) -> Dict[str, Any]:
+        """스마트 단일 지역 크롤링"""
+
+        # 크롤링 범위 결정
+        if district_name and dong_name:
+            scope = f"{province_name} {district_name} {dong_name}"
+        elif district_name:
+            scope = f"{province_name} {district_name} (모든 동)"
+        else:
+            scope = f"{province_name} (모든 구/동)"
+
+        logger.info(f"스마트 단일 지역 크롤링: {scope}")
 
         total_stats = {
             'regions_crawled': 0,
@@ -963,7 +972,7 @@ class Crawler(BaseCrawler):
                 logger.error("사이트 접근 실패")
                 return total_stats
 
-            # 지역 목록 가져오기 및 대상 지역 찾기
+            # 지역 목록 가져오기 및 대상 시/도 찾기
             provinces = self.get_all_regions_from_site()
             target_province = None
             for province in provinces:
@@ -977,128 +986,183 @@ class Crawler(BaseCrawler):
 
             logger.info(f"대상 시/도: {target_province['name']}")
 
+            # 시/군/구 목록 가져오기
             districts = self.get_districts_for_province(target_province['value'])
-            target_district = None
-            for district in districts:
-                if district_name in district['name']:
-                    target_district = district
-                    break
-
-            if not target_district:
-                logger.error(f"시/군/구를 찾을 수 없습니다: {district_name}")
+            if not districts:
+                logger.error("시/군/구 목록을 가져올 수 없습니다")
                 return total_stats
 
-            logger.info(f"대상 시/군/구: {target_district['name']}")
+            # 크롤링할 구 결정
+            if district_name:
+                # 특정 구만 크롤링
+                target_districts = []
+                for district in districts:
+                    if district_name in district['name']:
+                        target_districts.append(district)
+                        break
 
-            dongs = self.get_dongs_for_district(target_district['value'])
-            target_dong = None
-            for dong in dongs:
-                if dong_name in dong['name']:
-                    target_dong = dong
-                    break
+                if not target_districts:
+                    logger.error(f"지정된 시/군/구를 찾을 수 없습니다: {district_name}")
+                    return total_stats
 
-            if not target_dong:
-                target_dong = dongs[0] if dongs else None
-                logger.warning(f"지정된 읍/면/동을 찾을 수 없어 첫 번째 동 사용: {target_dong['name'] if target_dong else 'None'}")
-
-            if not target_dong:
-                logger.error("사용할 읍/면/동이 없습니다")
-                return total_stats
-
-            logger.info(f"대상 읍/면/동: {target_dong['name']}")
-
-            # 읍/면/동 선택 및 검색
-            selected_dong = self.select_dong_and_search(target_dong['index'])
-            if not selected_dong:
-                logger.error("읍/면/동 선택 실패")
-                return total_stats
-
-            # 데이터 크기 미리 확인
-            total_count = self.get_total_data_count()
-            logger.info(f"대상 지역 데이터 개수: {total_count}개")
-
-            if total_count == 0:
-                logger.info("추출할 데이터가 없습니다")
-                return {
-                    'regions_crawled': 1,
-                    'total_stores': 0,
-                    'total_saved': 0,
-                    'api_success': 0,
-                    'api_failed': 0
-                }
-
-            # 대용량 데이터 자동 감지 및 페이지네이션 적용
-            if auto_pagination and total_count > 500:
-                logger.info(f"대용량 데이터 감지 ({total_count}개), 페이지네이션 모드로 전환")
-
-                # 페이지네이션으로 데이터 추출
-                data = self.extract_data_with_pagination(batch_size=200)
-
-                if data and data.get('results'):
-                    # 배치별 DB 저장
-                    stores_data = data['results']
-                    total_stores = len(stores_data)
-                    logger.info(f"총 {total_stores}개 가맹점 데이터 추출 완료")
-
-                    # 50개씩 나누어 저장 (메모리 절약)
-                    total_saved = 0
-                    total_api_success = 0
-                    total_api_failed = 0
-
-                    save_batch_size = 50
-                    total_save_batches = (total_stores + save_batch_size - 1) // save_batch_size
-
-                    for i in range(0, total_stores, save_batch_size):
-                        batch = stores_data[i:i + save_batch_size]
-                        batch_num = (i // save_batch_size) + 1
-
-                        logger.info(f"DB 저장 배치 {batch_num}/{total_save_batches}: {len(batch)}개 처리 중...")
-
-                        save_stats = self.save_store_data(batch)
-                        total_saved += save_stats['saved']
-                        total_api_success += save_stats['naver_success'] + save_stats['kakao_success']
-                        total_api_failed += save_stats['api_failed']
-
-                        # 진행률 출력
-                        progress = (i + len(batch)) / total_stores * 100
-                        logger.info(f"DB 저장 진행률: {progress:.1f}% (누적 저장: {total_saved}개)")
-
-                        # 메모리 정리
-                        import gc
-                        gc.collect()
-
-                        # 잠시 대기
-                        time.sleep(0.5)
-
-                    total_stats.update({
-                        'regions_crawled': 1,
-                        'total_stores': total_stores,
-                        'total_saved': total_saved,
-                        'api_success': total_api_success,
-                        'api_failed': total_api_failed
-                    })
-
-                    logger.info(f"페이지네이션 처리 완료: {total_saved}개 저장")
-                else:
-                    logger.warning("페이지네이션 데이터 추출 실패")
+                logger.info(f"대상 시/군/구: {target_districts[0]['name']}")
             else:
-                # 일반 모드로 처리
-                logger.info(f"일반 크기 데이터 ({total_count}개), 기본 모드로 처리")
-                data = self.extract_data()
+                # 시의 모든 구 크롤링
+                target_districts = districts
+                logger.info(f"대상 시/군/구: 모든 구 ({len(target_districts)}개)")
 
-                if data and data.get('results'):
-                    save_stats = self.save_store_data(data['results'])
-                    total_stats.update({
-                        'regions_crawled': 1,
-                        'total_stores': len(data['results']),
-                        'total_saved': save_stats['saved'],
-                        'api_success': save_stats['naver_success'] + save_stats['kakao_success'],
-                        'api_failed': save_stats['api_failed']
-                    })
+            # 각 구에 대해 크롤링 수행
+            for district_idx, district in enumerate(target_districts, 1):
+                logger.info(f"[{district_idx}/{len(target_districts)}] 구 크롤링 시작: {district['name']}")
 
-                    logger.info(f"기본 모드 처리 완료: {save_stats['saved']}개 저장")
+                # 첫 번째 구가 아닌 경우 팝업 재설정
+                if district_idx > 1:
+                    logger.info("다음 구를 위한 지역선택 팝업 재오픈...")
+                    self.reopen_area_selection()
+                    # 시/도 재선택
+                    self.get_districts_for_province(target_province['value'])
+
+                # 해당 구의 동 목록 가져오기
+                dongs = self.get_dongs_for_district(district['value'])
+                if not dongs:
+                    logger.warning(f"{district['name']}: 읍/면/동 목록을 가져올 수 없습니다")
+                    continue
+
+                # 크롤링할 동 결정
+                if dong_name:
+                    # 특정 동만 크롤링
+                    target_dongs = []
+                    for dong in dongs:
+                        if dong_name in dong['name']:
+                            target_dongs.append(dong)
+                            break
+
+                    if not target_dongs:
+                        logger.warning(f"{district['name']}: 지정된 읍/면/동을 찾을 수 없습니다: {dong_name}")
+                        continue
+
+                    logger.info(f"{district['name']} 대상 동: {target_dongs[0]['name']}")
                 else:
-                    logger.warning("기본 모드 데이터 추출 실패")
+                    # 구의 모든 동 크롤링
+                    target_dongs = dongs
+                    logger.info(f"{district['name']} 대상 동: 모든 동 ({len(target_dongs)}개)")
+
+                # 해당 구의 각 동에 대해 크롤링 수행
+                for dong_idx, dong in enumerate(target_dongs, 1):
+                    logger.info(f"  [{dong_idx}/{len(target_dongs)}] 동 크롤링 시작: {dong['name']}")
+
+                    # 첫 번째 동이 아닌 경우 팝업 재설정
+                    if dong_idx > 1:
+                        logger.info("  다음 동을 위한 지역선택 팝업 재오픈...")
+                        self.reopen_area_selection()
+                        # 시/도, 시/군/구 재선택
+                        self.get_districts_for_province(target_province['value'])
+                        self.get_dongs_for_district(district['value'])
+
+                    # 읍/면/동 선택 및 검색
+                    selected_dong = self.select_dong_and_search(dong['index'])
+                    if not selected_dong:
+                        logger.error(f"  읍/면/동 선택 실패: {dong['name']}")
+                        continue
+
+                    # 데이터 크기 미리 확인
+                    total_count = self.get_total_data_count()
+                    logger.info(f"  {dong['name']} 데이터 개수: {total_count}개")
+
+                    if total_count == 0:
+                        logger.info(f"  {dong['name']}: 추출할 데이터가 없습니다")
+                        total_stats['regions_crawled'] += 1
+                        continue
+
+                    # 대용량 데이터 자동 감지 및 페이지네이션 적용
+                    if auto_pagination and total_count > 500:
+                        logger.info(f"  대용량 데이터 감지 ({total_count}개), 페이지네이션 모드로 전환")
+
+                        # 페이지네이션으로 데이터 추출
+                        data = self.extract_data_with_pagination(batch_size=200)
+
+                        if data and data.get('results'):
+                            # 배치별 DB 저장
+                            stores_data = data['results']
+                            dong_total_stores = len(stores_data)
+                            logger.info(f"  {dong['name']}: {dong_total_stores}개 가맹점 데이터 추출 완료")
+
+                            # 50개씩 나누어 저장
+                            dong_total_saved = 0
+                            dong_api_success = 0
+                            dong_api_failed = 0
+
+                            save_batch_size = 50
+                            total_save_batches = (dong_total_stores + save_batch_size - 1) // save_batch_size
+
+                            for i in range(0, dong_total_stores, save_batch_size):
+                                batch = stores_data[i:i + save_batch_size]
+                                batch_num = (i // save_batch_size) + 1
+
+                                logger.info(
+                                    f"    {dong['name']} DB 저장 배치 {batch_num}/{total_save_batches}: {len(batch)}개 처리 중...")
+
+                                save_stats = self.save_store_data(batch)
+                                dong_total_saved += save_stats['saved']
+                                dong_api_success += save_stats['naver_success'] + save_stats['kakao_success']
+                                dong_api_failed += save_stats['api_failed']
+
+                                # 진행률 출력
+                                progress = (i + len(batch)) / dong_total_stores * 100
+                                logger.info(
+                                    f"    {dong['name']} DB 저장 진행률: {progress:.1f}% (누적 저장: {dong_total_saved}개)")
+
+                                # 메모리 정리
+                                import gc
+                                gc.collect()
+                                time.sleep(0.5)
+
+                            # 동별 통계 누적
+                            total_stats['regions_crawled'] += 1
+                            total_stats['total_stores'] += dong_total_stores
+                            total_stats['total_saved'] += dong_total_saved
+                            total_stats['api_success'] += dong_api_success
+                            total_stats['api_failed'] += dong_api_failed
+
+                            logger.info(f"  {dong['name']} 페이지네이션 처리 완료: {dong_total_saved}개 저장")
+                        else:
+                            logger.warning(f"  {dong['name']}: 페이지네이션 데이터 추출 실패")
+                    else:
+                        # 일반 모드로 처리
+                        logger.info(f"  {dong['name']}: 일반 크기 데이터 ({total_count}개), 기본 모드로 처리")
+                        data = self.extract_data()
+
+                        if data and data.get('results'):
+                            save_stats = self.save_store_data(data['results'])
+                            total_stats['regions_crawled'] += 1
+                            total_stats['total_stores'] += len(data['results'])
+                            total_stats['total_saved'] += save_stats['saved']
+                            total_stats['api_success'] += save_stats['naver_success'] + save_stats['kakao_success']
+                            total_stats['api_failed'] += save_stats['api_failed']
+
+                            logger.info(f"  {dong['name']} 기본 모드 처리 완료: {save_stats['saved']}개 저장")
+                        else:
+                            logger.warning(f"  {dong['name']}: 기본 모드 데이터 추출 실패")
+
+                    logger.info(f"  [{dong_idx}/{len(target_dongs)}] {dong['name']} 크롤링 완료")
+
+                    # 특정 동만 찾는 경우 찾으면 다음 구로 이동
+                    if dong_name:
+                        break
+
+                logger.info(f"[{district_idx}/{len(target_districts)}] {district['name']} 크롤링 완료")
+
+                # 특정 구만 크롤링하는 경우 여기서 종료
+                if district_name:
+                    break
+
+            # 전체 결과 요약
+            logger.info(f"=== 전체 크롤링 완료 ===")
+            logger.info(f"크롤링한 동: {total_stats['regions_crawled']}개")
+            logger.info(f"총 발견 가맹점: {total_stats['total_stores']}개")
+            logger.info(f"총 저장 가맹점: {total_stats['total_saved']}개")
+            logger.info(f"API 성공: {total_stats['api_success']}개")
+            logger.info(f"API 실패: {total_stats['api_failed']}개")
 
             return total_stats
 
